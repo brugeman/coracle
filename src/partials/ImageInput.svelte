@@ -3,7 +3,6 @@
   import {displayList} from "hurdak"
   import Input from "src/partials/Input.svelte"
   import Modal from "src/partials/Modal.svelte"
-  import Content from "src/partials/Content.svelte"
   import Spinner from "src/partials/Spinner.svelte"
   import Anchor from "src/partials/Anchor.svelte"
   import {listenForFile} from "src/util/html"
@@ -34,9 +33,11 @@
               maxHeight,
             })) {
               // For inputs that only want one file
-              value = tags.type("url").values().first()
+              value = tags.get("url")?.value()
 
-              dispatch("change", tags)
+              if (value) {
+                dispatch("change", tags)
+              }
             }
           } finally {
             isOpen = false
@@ -64,7 +65,7 @@
     }}>
     <slot name="button">
       <div class="flex">
-        <Anchor theme="button">
+        <Anchor button tall>
           <i class="fa fa-upload" />
         </Anchor>
       </div>
@@ -74,14 +75,18 @@
 
 {#if isOpen}
   <Modal mini onEscape={decline}>
-    <Content>
-      {#if loading}
-        <Spinner delay={0}>Uploading files using: {displayList(urls)}</Spinner>
-      {:else}
-        <h1 class="staatliches text-2xl">Upload a File</h1>
+    {#if loading}
+      <Spinner delay={0}>Uploading files using: {displayList(urls)}</Spinner>
+    {:else}
+      <h1 class="staatliches text-2xl">Upload a File</h1>
+      <div class="flex flex-col gap-2">
         <p>Click below to select a file to upload.</p>
-        <input multiple={multi} type="file" bind:this={input} />
-      {/if}
-    </Content>
+        <p class="text-gray-3 text-sm">
+          <i class="fa fa-warning" />
+          Note that images are stored unencrypted and publicly accessible.
+        </p>
+      </div>
+      <input multiple={multi} type="file" bind:this={input} />
+    {/if}
   </Modal>
 {/if}

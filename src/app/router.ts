@@ -1,17 +1,9 @@
 import {last, fromPairs, identity} from "ramda"
-import {fromNostrURI} from "paravel"
+import {encodeAddress, decodeAddress, addressFromNaddr, addressToNaddr, fromNostrURI} from "paravel"
 import {nip19} from "nostr-tools"
 import {Router} from "src/util/router"
 import {tryJson} from "src/util/misc"
-import {Naddr} from "src/util/nostr"
-import {
-  decodePerson,
-  decodeRelay,
-  decodeEvent,
-  selectHints,
-  getNip24ChannelId,
-  getPubkeyHints,
-} from "src/engine"
+import {decodePerson, decodeRelay, decodeEvent, getChannelId, hints} from "src/engine"
 
 // Decoders
 
@@ -21,6 +13,7 @@ export const decodeJson = json => tryJson(() => JSON.parse(json))
 export const encodeCsv = xs => xs.join(",")
 export const decodeCsv = x => x.split(",")
 export const encodeRelays = xs => xs.map(url => last(url.split("//"))).join(",")
+export const encodeNaddr = a => addressToNaddr(decodeAddress(a, []))
 
 export const encodeFilter = f =>
   Object.entries(f)
@@ -49,22 +42,21 @@ export const decodeFilter = s =>
       }
 
       return [k, v.split(",")]
-    })
+    }),
   )
 
 export const decodeEntity = entity => {
   entity = fromNostrURI(entity)
 
-  let type, data, relays
+  let type, data
 
   try {
     ;({type, data} = nip19.decode(entity) as {type: string; data: any})
-    relays = selectHints(data.relays || [], 3)
   } catch (e) {
     // pass
   }
 
-  return {type, data, relays}
+  return {type, data, relays: hints.scenario([data?.relays || []]).getUrls()}
 }
 
 // Serializers
@@ -115,28 +107,31 @@ export const asFilter = {
 }
 
 export const asChannelId = {
-  encode: getNip24ChannelId,
+  encode: getChannelId,
   decode: decodeAs("pubkeys", decodeCsv),
 }
 
-export const asGroup = k => ({
-  encode: a => Naddr.fromTagValue(a).encode(),
-  decode: decodeAs(k, naddr => Naddr.decode(naddr).asTagValue()),
+export const asNaddr = k => ({
+  encode: encodeNaddr,
+  decode: decodeAs(k, naddr => encodeAddress(addressFromNaddr(naddr))),
 })
 
 // Router and extensions
 
 export const router = new Router()
 
+router.extend("qrcode", encodeURIComponent)
 router.extend("media", encodeURIComponent)
-router.extend("labels", encodeURIComponent)
 router.extend("relays", nip19.nrelayEncode)
-router.extend("channels", getNip24ChannelId)
-router.extend("groups", asGroup("group").encode)
+router.extend("channels", getChannelId)
+router.extend("groups", encodeNaddr)
+router.extend("events", encodeNaddr)
+router.extend("lists", encodeNaddr)
+router.extend("listings", encodeNaddr)
 
 router.extend("notes", (id, {relays = []} = {}) => {
   if (id.includes(":")) {
-    return Naddr.fromTagValue(id, relays).encode()
+    return addressToNaddr(decodeAddress(id, relays))
   }
 
   if (relays.length > 0) {
@@ -148,7 +143,12 @@ router.extend("notes", (id, {relays = []} = {}) => {
 
 router.extend("people", (pubkey, {relays = []} = {}) => {
   if (relays.length < 3) {
-    relays = relays.concat(getPubkeyHints.limit(3 - relays.length).getHints(pubkey))
+    relays = relays.concat(
+      hints
+        .FromPubkeys([pubkey])
+        .limit(3 - relays.length)
+        .getUrls(),
+    )
   }
 
   return nip19.nprofileEncode({pubkey, relays})

@@ -1,33 +1,27 @@
-import {max, partition, equals} from "ramda"
+import {max, uniq, partition, equals} from "ramda"
 import {noop, pickVals} from "hurdak"
 import {Plex, Relays, Executor, Multi, createEvent} from "paravel"
 import {error, warn} from "src/util/logger"
 import {LOCAL_RELAY_URL} from "src/util/nostr"
 import {normalizeRelayUrl} from "src/engine/relays/utils"
-import {env} from "src/engine/session/state"
 import {pool} from "src/engine/network/state"
+import {env} from "src/engine/session/state"
 import {getSetting} from "src/engine/session/utils"
 import {signer, canSign} from "src/engine/session/derived"
 import {LocalTarget} from "./targets"
 
 export const getUrls = (relays: string[]) => {
-  const {FORCE_RELAYS} = env.get()
-
-  if (FORCE_RELAYS?.length > 0) {
-    return FORCE_RELAYS
-  }
-
   if (relays.length === 0) {
     error(`Attempted to connect to zero urls`)
   }
 
-  const urls = new Set(relays.map(normalizeRelayUrl))
+  const urls = uniq(relays.map(normalizeRelayUrl))
 
-  if (urls.size !== relays.length) {
+  if (urls.length !== relays.length) {
     warn(`Attempted to connect to non-unique relays`)
   }
 
-  return Array.from(urls)
+  return urls
 }
 
 export const getTarget = (urls: string[]) => {
@@ -46,7 +40,9 @@ export const getTarget = (urls: string[]) => {
     if (connection.socket.isHealthy()) {
       target = new Plex(remoteUrls, connection)
     }
-  } else {
+  }
+
+  if (!target) {
     target = new Relays(remoteUrls.map(url => pool.get(url)))
   }
 
@@ -60,26 +56,47 @@ export const getTarget = (urls: string[]) => {
 const seenChallenges = new Set()
 
 export const onAuth = async (url, challenge) => {
-  if (canSign.get() && !seenChallenges.has(challenge) && getSetting("auto_authenticate")) {
-    seenChallenges.add(challenge)
+  const {FORCE_GROUP, PLATFORM_RELAYS} = env.get()
 
-    const event = await signer.get().signAsUser(
-      createEvent(22242, {
-        tags: [
-          ["challenge", challenge],
-          ["relay", url],
-        ],
-      })
-    )
-
-    pool.get(url).send(["AUTH", event])
-
-    return event
+  if (!canSign.get()) {
+    return
   }
+
+  if (seenChallenges.has(challenge)) {
+    return
+  }
+
+  if (!FORCE_GROUP && PLATFORM_RELAYS.length === 0 && !getSetting("auto_authenticate")) {
+    return
+  }
+
+  seenChallenges.add(challenge)
+
+  const event = await signer.get().signAsUser(
+    createEvent(22242, {
+      tags: [
+        ["relay", url],
+        ["challenge", challenge],
+      ],
+    }),
+  )
+
+  pool.get(url).send(["AUTH", event])
+
+  return event
 }
 
 export const getExecutor = (urls: string[]) => {
   const target = getTarget(urls)
+  const executor = new Executor(target)
+
+  executor.handleAuth({onAuth, onOk: noop})
+
+  return executor
+}
+
+export const getSimpleExecutor = (urls: string[]) => {
+  const target = new Relays(urls.map(url => pool.get(url)))
   const executor = new Executor(target)
 
   executor.handleAuth({onAuth, onOk: noop})
@@ -92,7 +109,7 @@ setInterval(() => {
 
   for (const [url, con] of pool.data.entries()) {
     // @ts-ignore
-    const lastActivity = pickVals(activityKeys, con.meta).reduce(max)
+    const lastActivity: number = pickVals(activityKeys, con.meta).reduce(max)
 
     // If our connection hasn't been used in a while, close it and reopen
     if (lastActivity && lastActivity < Date.now() - 60_000) {

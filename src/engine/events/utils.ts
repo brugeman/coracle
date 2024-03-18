@@ -1,26 +1,11 @@
 import {nip19} from "nostr-tools"
 import {sortBy} from "ramda"
-import {fromNostrURI, Tags} from "paravel"
+import {fromNostrURI, Tags, hasValidSignature} from "paravel"
 import {tryFunc, switcherFn} from "hurdak"
-import {Naddr} from "src/util/nostr"
-import {getEventHints} from "src/engine/relays/utils"
+import {tryJson} from "src/util/misc"
 import type {Event} from "./model"
 
 export const sortEventsDesc = sortBy((e: Event) => -e.created_at)
-
-export const isReplaceable = e => e.kind >= 10000
-
-export const getIds = (e: Event) => {
-  const ids = [e.id]
-
-  if (isReplaceable(e)) {
-    ids.push(Naddr.fromEvent(e, getEventHints(e)).asTagValue())
-  }
-
-  return ids
-}
-
-export const isChildOf = (a, b) => getIds(b).includes(Tags.from(a).getReply())
 
 const annotateEvent = eid => ({
   eid,
@@ -55,4 +40,26 @@ export const decodeEvent = entity => {
     note: () => annotateEvent(data),
     default: () => annotateEvent(entity),
   })
+}
+
+export const unwrapRepost = repost => {
+  const event = tryJson(() => JSON.parse(repost.content))
+
+  try {
+    if (!event || !hasValidSignature(event)) {
+      return null
+    }
+  } catch (e) {
+    return null
+  }
+
+  const originalGroup = Tags.fromEvent(event).context().values().first()
+  const repostGroup = Tags.fromEvent(repost).context().values().first()
+
+  // Only show cross-posts, not reposts from global to global
+  if (originalGroup === repostGroup) {
+    return null
+  }
+
+  return event
 }

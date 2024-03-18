@@ -2,7 +2,6 @@
   import {onMount} from "svelte"
   import Compose from "src/app/shared/Compose.svelte"
   import Anchor from "src/partials/Anchor.svelte"
-  import Heading from "src/partials/Heading.svelte"
 
   export let signup
   export let setStage
@@ -18,17 +17,24 @@
   })
 </script>
 
-<Heading class="text-center">Welcome to Nostr</Heading>
+<div class="flex gap-3">
+  <p
+    class="-ml-1 -mt-2 flex h-12 w-12 items-center justify-center rounded-full bg-neutral-700 text-lg">
+    4/4
+  </p>
+  <p class="text-2xl font-bold">You're all set!</p>
+</div>
 <p>
-  Your're all set! If have any questions, just ask! People around these parts are always ready to
-  lend a hand.
+  If you have any questions, just use the #asknostr hashtag — people are always happy to lend a
+  hand.
 </p>
-<div class="border-l-2 border-solid border-gray-6 pl-4">
-  <Compose bind:this={compose} onSubmit={next} />
+<p>Now is a great time to introduce yourself to the Nostr network!</p>
+<div class="border-l-2 border-solid border-neutral-600 pl-4">
+  <Compose autofocus bind:this={compose} onSubmit={next} />
 </div>
 <div class="flex gap-2">
-  <Anchor theme="button" on:click={prev}><i class="fa fa-arrow-left" /></Anchor>
-  <Anchor theme="button-accent" class="flex-grow text-center" on:click={next}>Say Hello!</Anchor>
+  <Anchor button on:click={prev}><i class="fa fa-arrow-left" /> Back</Anchor>
+  <Anchor button accent class="flex-grow text-center" on:click={next}>Say Hello</Anchor>
 </div>
 <Anchor class="text-center" on:click={skip}>
   Skip and see your feed <i class="fa fa-arrow-right" />

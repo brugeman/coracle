@@ -1,16 +1,17 @@
 <script lang="ts">
-  import {Tags} from "paravel"
+  import {Tags, decodeAddress} from "paravel"
   import {randomId} from "hurdak"
-  import {Naddr} from "src/util/nostr"
   import {toast} from "src/partials/state"
   import Heading from "src/partials/Heading.svelte"
+  import Field from "src/partials/Field.svelte"
   import PersonBadge from "src/app/shared/PersonBadge.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Anchor from "src/partials/Anchor.svelte"
   import Input from "src/partials/Input.svelte"
-  import MultiSelect from "src/partials/MultiSelect.svelte"
+  import SearchSelect from "src/partials/SearchSelect.svelte"
   import {router} from "src/app/router"
   import {
+    env,
     userLists,
     searchPeople,
     searchTopics,
@@ -21,18 +22,19 @@
   } from "src/engine"
 
   export let list = null
-  export let naddr = null
+  export let address = null
 
-  if (!list && naddr) {
-    list = userLists.key(naddr).get()
+  if (!list && address) {
+    list = userLists.key(address).get()
   }
 
-  const tags = list ? Tags.from(list) : Tags.from([])
+  const tags = list ? Tags.fromEvent(list) : Tags.from([])
 
-  let values = {
-    name: tags.getValue("name") || tags.getValue("d") || "",
-    params: tags.type(["t", "p"]).all(),
-    relays: tags.type("r").all(),
+  const values = {
+    title: tags.get("title")?.value() || tags.get("name")?.value() || tags.get("d")?.value() || "",
+    description: tags.get("description")?.value() || "",
+    params: tags.filter(t => ["t", "p"].includes(t.key())).valueOf(),
+    relays: tags.whereValue("r").valueOf(),
   }
 
   const search = q => {
@@ -50,39 +52,39 @@
   const searchRelayTags = q => $searchRelays(q).map(r => ["r", r.url])
 
   const submit = () => {
-    if (!values.name) {
-      return toast.show("error", "A name is required for your list")
+    if (!values.title) {
+      return toast.show("warning", "A name is required for your list")
     }
 
-    const duplicates = $userLists.filter(l => l.name === values.name && l.naddr !== naddr)
+    const duplicates = $userLists.filter(l => l.title === values.title && l.address !== address)
 
     if (duplicates.length > 0) {
-      return toast.show("error", "That name is already in use")
+      return toast.show("warning", "That name is already in use")
     }
 
-    const id = naddr ? Naddr.decode(naddr).identifier : randomId()
-    const {name, params, relays} = values
+    const id = address ? decodeAddress(address).identifier : randomId()
+    const {title, description, params, relays} = values
 
-    publishBookmarksList(id, name, [...params, ...relays])
+    publishBookmarksList(id, title, description, [...params, ...relays])
     toast.show("info", "Your list has been saved!")
     router.pop()
   }
 </script>
 
 <form on:submit|preventDefault={submit}>
-  <Content>
-    <Heading class="text-center">{naddr ? "Edit" : "Add"} list</Heading>
+  <FlexColumn>
+    <Heading class="text-center">{address ? "Edit" : "Add"} list</Heading>
     <div class="flex w-full flex-col gap-8">
-      <div class="flex flex-col gap-1">
-        <strong>Name</strong>
-        <Input bind:value={values.name} placeholder="My list" />
-        <p class="text-sm text-gray-4">
-          Lists are identified by their name, so this has to be unique.
-        </p>
-      </div>
-      <div class="flex flex-col gap-1">
-        <strong>Topics and People</strong>
-        <MultiSelect {search} bind:value={values.params}>
+      <Field label="Name">
+        <Input bind:value={values.title} placeholder="My list" />
+        <p slot="info">Lists are identified by their name, so this has to be unique.</p>
+      </Field>
+      <Field label="Description">
+        <Input bind:value={values.description} placeholder="About my list" />
+        <p slot="info">A brief description of what is in this list.</p>
+      </Field>
+      <Field label="Topics and People">
+        <SearchSelect multiple {search} bind:value={values.params}>
           <div slot="item" let:item let:context>
             {#if item[0] === "p"}
               {#if context === "value"}
@@ -94,22 +96,23 @@
               <strong>#{item[1]}</strong>
             {/if}
           </div>
-        </MultiSelect>
-        <p class="text-sm text-gray-4">Type "@" to look for people, and "#" to look for topics.</p>
-      </div>
-      <div class="flex flex-col gap-1">
-        <strong>Relays</strong>
-        <MultiSelect search={searchRelayTags} bind:value={values.relays}>
-          <div slot="item" let:item>
-            {displayRelay({url: item[1]})}
-          </div>
-        </MultiSelect>
-        <p class="text-sm text-gray-4">
-          Select which relays to limit this list to. If you leave this blank, your default relays
-          will be used.
-        </p>
-      </div>
-      <Anchor tag="button" theme="button" type="submit" class="text-center">Save</Anchor>
+        </SearchSelect>
+        <p slot="info">Type "@" to look for people, and "#" to look for topics.</p>
+      </Field>
+      {#if $env.PLATFORM_RELAYS.length === 0}
+        <Field label="Relays">
+          <SearchSelect multiple search={searchRelayTags} bind:value={values.relays}>
+            <div slot="item" let:item>
+              {displayRelay({url: item[1]})}
+            </div>
+          </SearchSelect>
+          <p slot="info">
+            Select which relays to limit this list to. If you leave this blank, your default relays
+            will be used.
+          </p>
+        </Field>
+      {/if}
+      <Anchor button tag="button" type="submit">Save</Anchor>
     </div>
-  </Content>
+  </FlexColumn>
 </form>

@@ -1,18 +1,17 @@
 <script lang="ts">
+  import {isGiftWrap} from "src/util/nostr"
   import FieldInline from "src/partials/FieldInline.svelte"
   import Toggle from "src/partials/Toggle.svelte"
   import Anchor from "src/partials/Anchor.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Heading from "src/partials/Heading.svelte"
-  import {events, user, EventKind} from "src/engine"
-
-  const encryptedKinds = [EventKind.Nip04Message, EventKind.GiftWrap]
+  import {events, user} from "src/engine"
 
   const submit = async () => {
     const jsonl = $events
       .filter(e => {
         if (userOnly && e.pubkey !== $user.pubkey) return false
-        if (!includeEncrypted && encryptedKinds.includes(e.kind)) return false
+        if (!includeEncrypted && isGiftWrap(e)) return false
 
         return true
       })
@@ -39,7 +38,7 @@
 </script>
 
 <form on:submit|preventDefault={submit}>
-  <Content>
+  <FlexColumn>
     <div class="mb-4 flex flex-col items-center justify-center">
       <Heading>Export Settings</Heading>
       <p>Select which events you'd like to export</p>
@@ -56,7 +55,7 @@
           encrypted, so this will not reduce security.
         </p>
       </FieldInline>
-      <Anchor tag="button" theme="button" type="submit" class="text-center">Export</Anchor>
+      <Anchor button tag="button" type="submit">Export</Anchor>
     </div>
-  </Content>
+  </FlexColumn>
 </form>

@@ -1,9 +1,9 @@
 <script lang="ts">
   import {onMount} from "svelte"
   import {defer} from "hurdak"
+  import {getIdOrAddress} from "paravel"
   import {isMobile} from "src/util/html"
   import {fly} from "src/util/transition"
-  import Content from "src/partials/Content.svelte"
   import Spinner from "src/partials/Spinner.svelte"
   import Note from "src/app/shared/Note.svelte"
   import type {Event} from "src/engine"
@@ -20,12 +20,10 @@
   })
 </script>
 
-<Content>
-  {#await promise}
-    <Spinner />
-  {:then note}
-    <div in:fly={{y: 20}}>
-      <Note showGroup showLoading anchorId={note.id} {note} {depth} {relays} {context} />
-    </div>
-  {/await}
-</Content>
+{#await promise}
+  <Spinner />
+{:then note}
+  <div in:fly={{y: 20}}>
+    <Note showGroup showLoading anchor={getIdOrAddress(note)} {note} {depth} {relays} {context} />
+  </div>
+{/await}

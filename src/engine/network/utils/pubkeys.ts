@@ -1,9 +1,10 @@
+import type {Event} from "nostr-tools"
 import {without, uniq} from "ramda"
-import {chunk, seconds} from "hurdak"
+import {seconds} from "hurdak"
 import {now} from "paravel"
 import {personKinds, appDataKeys} from "src/util/nostr"
 import {people} from "src/engine/people/state"
-import {mergeHints, getPubkeyHints} from "src/engine/relays/utils"
+import {hints} from "src/engine/relays/utils"
 import type {Filter} from "../model"
 import {load} from "./load"
 
@@ -11,16 +12,22 @@ export type LoadPeopleOpts = {
   relays?: string[]
   kinds?: number[]
   force?: boolean
+  onEvent?: (e: Event) => void
 }
 
 export const attemptedPubkeys = new Map()
 
-export const getStalePubkeys = (pubkeys: string[]) => {
-  const stale = new Set()
+export const getStalePubkeys = (pubkeys: Iterable<string>) => {
+  const stale = new Set<string>()
   const since = now() - seconds(3, "hour")
 
   for (const pubkey of pubkeys) {
+    if (!pubkey.match(/^[0-f]{64}$/)) {
+      continue
+    }
+
     const attempts = attemptedPubkeys.get(pubkey) | 0
+
     if (stale.has(pubkey) || attempts > 1) {
       continue
     }
@@ -42,41 +49,28 @@ export const getStalePubkeys = (pubkeys: string[]) => {
 }
 
 export const loadPubkeys = async (
-  rawPubkeys: string[],
-  {relays, force, kinds = personKinds}: LoadPeopleOpts = {}
+  rawPubkeys: Iterable<string>,
+  {relays, force, onEvent, kinds = personKinds}: LoadPeopleOpts = {},
 ) => {
-  const pubkeys = force ? uniq(rawPubkeys) : getStalePubkeys(rawPubkeys)
+  const pubkeys = force ? uniq(Array.from(rawPubkeys)) : getStalePubkeys(rawPubkeys)
 
-  const getChunkRelays = (chunk: string[]) => {
-    const groups = chunk.map(pubkey => getPubkeyHints(pubkey, "write"))
-
-    if (relays) {
-      groups.push(relays)
-    }
-
-    return mergeHints(groups)
+  if (pubkeys.length === 0) {
+    return
   }
 
-  const getChunkFilters = (chunk: string[]) => {
-    const filter = [] as Filter[]
+  const filters = [] as Filter[]
 
-    filter.push({kinds: without([30078], kinds), authors: chunk})
+  filters.push({kinds: without([30078], kinds), authors: pubkeys})
 
-    // Add a separate filter for app data so we're not pulling down other people's stuff,
-    // or obsolete events of our own.
-    if (kinds.includes(30078)) {
-      filter.push({kinds: [30078], authors: chunk, "#d": Object.values(appDataKeys)})
-    }
-
-    return filter
+  // Add a separate filters for app data so we're not pulling down other people's stuff,
+  // or obsolete events of our own.
+  if (kinds.includes(30078)) {
+    filters.push({kinds: [30078], authors: pubkeys, "#d": Object.values(appDataKeys)})
   }
 
-  await Promise.all(
-    chunk(256, pubkeys).map((chunk: string[]) =>
-      load({
-        relays: getChunkRelays(chunk),
-        filters: getChunkFilters(chunk),
-      })
-    )
-  )
+  return load({
+    filters,
+    onEvent,
+    relays: hints.merge([hints.scenario([relays]), hints.FromPubkeys(pubkeys)]).getUrls(),
+  })
 }

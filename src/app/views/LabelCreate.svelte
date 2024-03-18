@@ -1,10 +1,10 @@
 <script lang="ts">
   import {toast} from "src/partials/state"
   import Heading from "src/partials/Heading.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Anchor from "src/partials/Anchor.svelte"
   import Field from "src/partials/Field.svelte"
-  import MultiSelect from "src/partials/MultiSelect.svelte"
+  import SearchSelect from "src/partials/SearchSelect.svelte"
   import {router} from "src/app/router"
   import {publishLabel, searchTopics} from "src/engine"
 
@@ -31,7 +31,7 @@
 </script>
 
 <form on:submit|preventDefault={submit}>
-  <Content>
+  <FlexColumn>
     <Heading class="text-center">Add Tags</Heading>
     <p class="text-center">
       Recommend content to people who follow you. You can find your recommendations under the
@@ -39,7 +39,8 @@
     </p>
     <div class="flex w-full flex-col gap-8">
       <Field label="Tags">
-        <MultiSelect
+        <SearchSelect
+          multiple
           autofocus
           search={$searchTopics}
           bind:value={topics}
@@ -47,10 +48,10 @@
           <div slot="item" let:item>
             <strong>{item.name}</strong>
           </div>
-        </MultiSelect>
+        </SearchSelect>
         <div slot="info">Tag this content so other people can find it.</div>
       </Field>
-      <Anchor tag="button" theme="button" type="submit" class="text-center">Save</Anchor>
+      <Anchor button tag="button" type="submit">Save</Anchor>
     </div>
-  </Content>
+  </FlexColumn>
 </form>

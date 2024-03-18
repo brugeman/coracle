@@ -1,11 +1,9 @@
 import {bech32, utf8} from "@scure/base"
-import {debounce} from "throttle-debounce"
-import {now} from "paravel"
+import {now, stripProtocol} from "paravel"
 import {pluck, fromPairs, last, identity, sum, is, equals} from "ramda"
-import {ensurePlural, Storage, defer, isPojo, first, seconds, tryFunc, sleep, round} from "hurdak"
+import {ensurePlural, defer, isPojo, first, seconds, tryFunc, sleep, round} from "hurdak"
 import Fuse from "fuse.js"
-import {writable} from "svelte/store"
-import {warn} from "src/util/logger"
+import logger from "src/util/logger"
 
 export const fuzzy = <T>(data: T[], opts = {}) => {
   const fuse = new Fuse(data, opts) as any
@@ -16,13 +14,19 @@ export const fuzzy = <T>(data: T[], opts = {}) => {
   }
 }
 
+export const secondsToDate = ts => new Date(parseInt(ts) * 1000)
+
+export const dateToSeconds = date => Math.round(date.valueOf() / 1000)
+
 export const getTimeZone = () => new Date().toString().match(/GMT[^\s]+/)
 
 export const createLocalDate = (dateString: any) => new Date(`${dateString} ${getTimeZone()}`)
 
+export const getLocale = () => (new Intl.DateTimeFormat()).resolvedOptions().locale
+
 export const formatTimestamp = (ts: number) => {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
+  const formatter = new Intl.DateTimeFormat(getLocale(), {
+    dateStyle: "short",
     timeStyle: "short",
   })
 
@@ -30,7 +34,7 @@ export const formatTimestamp = (ts: number) => {
 }
 
 export const formatTimestampAsDate = (ts: number) => {
-  const formatter = new Intl.DateTimeFormat("en-US", {
+  const formatter = new Intl.DateTimeFormat(getLocale(), {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -55,7 +59,8 @@ export const formatTimestampRelative = (ts: number) => {
     delta = Math.round(delta / seconds(1, "day"))
   }
 
-  const formatter = new Intl.RelativeTimeFormat("en-US", {
+  const locale = (new Intl.RelativeTimeFormat()).resolvedOptions().locale
+  const formatter = new Intl.RelativeTimeFormat(locale, {
     numeric: "auto",
   })
 
@@ -74,6 +79,7 @@ export const formatTimestampAsLocalISODate = (ts: number) => {
 }
 
 type ScrollerOpts = {
+  delay?: number
   threshold?: number
   reverse?: boolean
   element?: Element
@@ -81,7 +87,7 @@ type ScrollerOpts = {
 
 export const createScroller = <T>(
   loadMore: () => Promise<T>,
-  {threshold = 2000, reverse = false, element = document.body}: ScrollerOpts = {},
+  {delay = 1000, threshold = 2000, reverse = false, element = document.body}: ScrollerOpts = {},
 ) => {
   let done = false
   const check = async () => {
@@ -97,7 +103,7 @@ export const createScroller = <T>(
     }
 
     // No need to check all that often
-    await sleep(1000)
+    await sleep(delay)
 
     if (!done) {
       requestAnimationFrame(check)
@@ -112,14 +118,6 @@ export const createScroller = <T>(
       done = true
     },
   }
-}
-
-export const synced = (key: string, defaultValue: any) => {
-  const store = writable(Storage.getJson(key) || defaultValue)
-
-  store.subscribe(debounce(1000, $value => Storage.setJson(key, $value)))
-
-  return store
 }
 
 // https://stackoverflow.com/a/21682946
@@ -139,14 +137,14 @@ export const hsl = (hue: number, {saturation = 100, lightness = 50, opacity = 1}
 export const tryJson = <T>(f: () => T) =>
   tryFunc(f, (e: Error) => {
     if (!e.toString().includes("JSON")) {
-      warn(e)
+      logger.warn(e)
     }
   })
 
 export const tryFetch = <T>(f: () => T) =>
   tryFunc(f, (e: Error) => {
     if (!e.toString().includes("fetch")) {
-      warn(e)
+      logger.warn(e)
     }
   })
 
@@ -163,30 +161,6 @@ export const formatSats = (sats: number) => {
   if (sats < 1_000_000) return numberFmt.format(round(1, sats / 1000)) + "K"
   if (sats < 100_000_000) return numberFmt.format(round(1, sats / 1_000_000)) + "MM"
   return numberFmt.format(round(2, sats / 100_000_000)) + "BTC"
-}
-
-export const shadeColor = (color: string, percent: number) => {
-  let R = parseInt(color.substring(1, 3), 16)
-  let G = parseInt(color.substring(3, 5), 16)
-  let B = parseInt(color.substring(5, 7), 16)
-
-  R = (R * (100 + percent)) / 100
-  G = (G * (100 + percent)) / 100
-  B = (B * (100 + percent)) / 100
-
-  R = R < 255 ? R : 255
-  G = G < 255 ? G : 255
-  B = B < 255 ? B : 255
-
-  R = Math.round(R)
-  G = Math.round(G)
-  B = Math.round(B)
-
-  const RR = R.toString(16).length == 1 ? "0" + R.toString(16) : R.toString(16)
-  const GG = G.toString(16).length == 1 ? "0" + G.toString(16) : G.toString(16)
-  const BB = B.toString(16).length == 1 ? "0" + B.toString(16) : B.toString(16)
-
-  return "#" + RR + GG + BB
 }
 
 export const pushToKey = <T>(m: Record<string, T[]> | Map<string, T[]>, k: string, v: T) => {
@@ -221,7 +195,9 @@ export const race = (p, promises) => {
 }
 
 export const displayUrl = url => {
-  return url.replace(/(https?|wss?)?:\/\/(www\.)?/, "").replace(/\/$/, "")
+  return stripProtocol(url)
+    .replace(/^(www\.)?/i, "")
+    .replace(/\/$/, "")
 }
 
 export const displayDomain = url => {
@@ -304,7 +280,7 @@ export const createBatcher = <T, U>(t, execute: (request: T[]) => U[] | Promise<
     const results = await execute(pluck("request", items))
 
     if (results.length !== items.length) {
-      console.warn("Execute must return a promise for each request", results, items)
+      logger.warn("Execute must return a promise for each request", results, items)
     }
 
     results.forEach(async (r, i) => items[i].deferred.resolve(await r))
@@ -343,3 +319,9 @@ export const joinPath = (...parts) => {
 
   return path.slice(0, -1)
 }
+
+export const updateIn =
+  <T>(k: string, f: (x: T) => T) =>
+  x => ({...x, [k]: f(x[k])})
+
+export const pickVals = <T>(ks: string[], x: Record<string, T>) => ks.map(k => x[k])

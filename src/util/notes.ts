@@ -1,13 +1,15 @@
-import {last, map, pluck, identity} from "ramda"
+import {last, pluck, identity} from "ramda"
 import {fromNostrURI, Tags} from "paravel"
 import {nip19} from "nostr-tools"
 import {first, switcherFn} from "hurdak"
+import logger from "src/util/logger"
 
 export const NEWLINE = "newline"
 export const ELLIPSIS = "ellipsis"
 export const TEXT = "text"
 export const TOPIC = "topic"
 export const LINK = "link"
+export const CASHU = "cashu"
 export const INVOICE = "invoice"
 export const NOSTR_NOTE = "nostr:note"
 export const NOSTR_NEVENT = "nostr:nevent"
@@ -16,26 +18,24 @@ export const NOSTR_NPROFILE = "nostr:nprofile"
 export const NOSTR_NADDR = "nostr:naddr"
 
 export const urlIsMedia = (url: string) =>
-  !url.match(/\.(apk|docx|xlsx|csv|dmg)/) && last(url.split("://"))?.includes("/")
+  !url.match(/\.(apk|docx|xlsx|csv|dmg)/) &&
+  last(url.replace(/\/$/, "").split("://"))?.includes("/")
 
 export const parseContent = (event: {content: string; tags?: string[][]}) => {
   const result: any[] = []
-  const tags = new Tags(event.tags || [])
-  let text = event.content.trim() || tags.getValue("alt") || ""
+  const tags = Tags.from(event.tags || [])
+  let text = event.content.trim() || tags.get("alt")?.value() || ""
   let buffer = ""
 
-  const getMeta = url =>
-    tags
-      .type("imeta")
-      .map(
-        map((m: string) => {
-          const parts = m.split(" ")
+  const getMeta = (url, hash) => {
+    const meta = tags.imeta(url) || Tags.from([])
 
-          return [parts[0], parts.slice(1).join(" ")]
-        })
-      )
-      .filter(meta => new Tags(meta).type("url").nthEq(1, url).exists())
-      .flatMap(identity)
+    for (const [k, v] of new URLSearchParams(hash).entries()) {
+      meta.addTag(k, v)
+    }
+
+    return meta
+  }
 
   const parseNewline = () => {
     const newline = first(text.match(/^\n+/))
@@ -73,7 +73,7 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
   }
 
   const parseTopic = () => {
-    const topic: string = first(text.match(/^#\w+/i))
+    const topic: string = first(text.match(/^#[^\s!\"#$%&'()*+,-.\/:;<=>?@[\\\]^_`{|}~]+/i))
 
     // Skip numeric topics
     if (topic && !topic.match(/^#\d+$/)) {
@@ -83,7 +83,7 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
 
   const parseBech32 = () => {
     const bech32 = first(
-      text.match(/^(web\+)?(nostr:)?\/?\/?n(event|ote|profile|pub|addr)1[\d\w]+/i)
+      text.match(/^(web\+)?(nostr:)?\/?\/?n(event|ote|profile|pub|addr)1[\d\w]+/i),
     )
 
     if (bech32) {
@@ -100,22 +100,30 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
 
         return [`nostr:${type}`, bech32, {...value, entity}]
       } catch (e) {
-        console.warn(e)
+        logger.warn(e)
       }
     }
   }
 
   const parseInvoice = () => {
-    const invoice = first(text.match(/^ln(bc|url)[\d\w]{50,1000}/i))
+    const invoice = first(text.match(/^ln(lnbc|lnurl)[\d\w]{50,1000}/i))
 
     if (invoice) {
       return [INVOICE, invoice, invoice]
     }
   }
 
+  const parseCashu = () => {
+    const cashu = first(text.match(/^(cashu)[\d\w]{50,5000}/i))
+
+    if (cashu) {
+      return [CASHU, cashu, cashu]
+    }
+  }
+
   const parseUrl = () => {
     const raw: string = first(
-      text.match(/^([a-z\+:]{2,30}:\/\/)?[^<>\(\)\s]+\.[a-z]{2,6}[^\s]*[^<>"'\.!?,:\s\)\(]/gi)
+      text.match(/^([a-z\+:]{2,30}:\/\/)?[^<>\(\)\s]+\.[a-z]{2,6}[^\s]*[^<>"'\.!?,:\s\)\(]/gi),
     )
 
     // Skip url if it's just the end of a filepath
@@ -129,7 +137,8 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
       return
     }
 
-    let url = raw
+    // Strip hash component
+    let [url, hash] = raw.split("#")
 
     // Skip ellipses and very short non-urls
     if (url.match(/\.\./)) {
@@ -140,7 +149,7 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
       url = "https://" + url
     }
 
-    return [LINK, raw, {url, isMedia: urlIsMedia(url), meta: getMeta(url)}]
+    return [LINK, raw, {url, hash, isMedia: urlIsMedia(url), meta: getMeta(url, hash)}]
   }
 
   while (text) {
@@ -150,6 +159,7 @@ export const parseContent = (event: {content: string; tags?: string[][]}) => {
       parseTopic() ||
       parseBech32() ||
       parseUrl() ||
+      parseCashu() ||
       parseInvoice()
 
     if (part) {
@@ -183,12 +193,17 @@ type TruncateContentOpts = {
   showEntire: boolean
   maxLength: number
   showMedia: boolean
+  skipMedia: boolean
 }
 
 export const truncateContent = (
   content: any[],
-  {showEntire, maxLength, showMedia = false}: TruncateContentOpts
+  {showEntire, maxLength, showMedia = false, skipMedia = false}: TruncateContentOpts,
 ) => {
+  if (skipMedia) {
+    content = content.filter(p => !p.value.isMedia)
+  }
+
   if (showEntire) {
     return content
   }
@@ -196,12 +211,13 @@ export const truncateContent = (
   let length = 0
   const result: any[] = []
   const truncateAt = maxLength * 0.6
-  const mediaLength = maxLength / 3
+  const mediaLength = showMedia ? maxLength / 3 : 50
   const entityLength = 30
 
   content.every((part, i) => {
     length += switcherFn(part.type, {
       [LINK]: () => (part.value.isMedia ? mediaLength : entityLength),
+      [CASHU]: () => mediaLength,
       [INVOICE]: () => mediaLength,
       [NOSTR_NOTE]: () => mediaLength,
       [NOSTR_NEVENT]: () => mediaLength,
@@ -228,5 +244,5 @@ export const truncateContent = (
 export const getLinks = (parts: any[]) =>
   pluck(
     "value",
-    parts.filter(x => x.type === LINK && x.isMedia)
+    parts.filter(x => x.type === LINK && x.isMedia),
   )

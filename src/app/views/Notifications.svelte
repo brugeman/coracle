@@ -1,35 +1,33 @@
 <script lang="ts">
-  import {find, assoc} from "ramda"
+  import {find} from "ramda"
   import {onMount} from "svelte"
-  import {now} from "paravel"
   import {createScroller, formatTimestampAsDate} from "src/util/misc"
   import {noteKinds, reactionKinds} from "src/util/nostr"
   import Tabs from "src/partials/Tabs.svelte"
   import Content from "src/partials/Content.svelte"
+  import Note from "src/app/shared/Note.svelte"
   import GroupAlert from "src/app/shared/GroupAlert.svelte"
   import GroupRequest from "src/app/shared/GroupRequest.svelte"
+  import OnboardingTasks from "src/app/views/OnboardingTasks.svelte"
   import NotificationReactions from "src/app/views/NotificationReactions.svelte"
   import NotificationMention from "src/app/views/NotificationMention.svelte"
   import NotificationReplies from "src/app/views/NotificationReplies.svelte"
   import {router} from "src/app/router"
   import type {Event} from "src/engine"
   import {
-    env,
     session,
+    settings,
+    markAsSeen,
     notifications,
-    otherNotifications,
     groupNotifications,
+    createNotificationGroups,
     loadNotifications,
-    updateCurrentSession,
+    loadGroupMessages,
+    unreadNotifications,
+    unreadGroupNotifications,
   } from "src/engine"
 
-  const tabs = ["Mentions & Replies", "Reactions"]
-
-  if ($env.ENABLE_GROUPS) {
-    tabs.push("Other")
-  }
-
-  const lastSynced = $session?.notifications_last_synced || 0
+  const allTabs = ["Mentions & Replies", "Reactions", "Groups"]
 
   const throttledNotifications = notifications.throttle(300)
 
@@ -44,32 +42,61 @@
     }
   }
 
-  export let activeTab = tabs[0]
+  const getTabKinds = tab => (tab === allTabs[0] ? noteKinds : reactionKinds.concat(9734))
+
+  export let activeTab = allTabs[0]
 
   let limit = 4
+  let innerWidth = 0
+  let tabNotifications = []
+  let unreadMainNotifications = []
+  let unreadReactionNotifications = []
 
-  $: tabKinds = activeTab === tabs[0] ? noteKinds : reactionKinds.concat(9734)
+  $: {
+    const groupedNotifications = createNotificationGroups(
+      $throttledNotifications,
+      getTabKinds(activeTab),
+    ).slice(0, limit)
 
-  $: groupedNotifications = groupNotifications($throttledNotifications, tabKinds).slice(0, limit)
+    tabNotifications =
+      activeTab === allTabs[0]
+        ? groupedNotifications.filter(
+            n => !n.event || find((e: Event) => noteKinds.includes(e.kind), n.interactions),
+          )
+        : groupedNotifications.filter(n =>
+            find((e: Event) => reactionKinds.includes(e.kind), n.interactions),
+          )
 
-  $: tabNotifications =
-    activeTab === tabs[0]
-      ? groupedNotifications.filter(
-          n => !n.event || find((e: Event) => noteKinds.includes(e.kind), n.interactions)
-        )
-      : groupedNotifications.filter(n =>
-          find((e: Event) => reactionKinds.includes(e.kind), n.interactions)
-        )
+    const unreadMainKinds = getTabKinds(allTabs[0])
+    const unreadReactionKinds = getTabKinds(allTabs[1])
 
-  $: uncheckedOtherNotifications = $otherNotifications.filter(n => n.created_at > lastSynced)
+    unreadMainNotifications = $unreadNotifications.filter(e => unreadMainKinds.includes(e.kind))
+    unreadReactionNotifications = $unreadNotifications.filter(e =>
+      unreadReactionKinds.includes(e.kind),
+    )
+  }
+
+  $: displayTabs =
+    innerWidth <= 640 || !$settings.enable_reactions
+      ? [allTabs[0], allTabs[2]]
+      : allTabs
 
   document.title = "Notifications"
 
   onMount(() => {
+    loadGroupMessages()
     loadNotifications()
 
-    const unsub = throttledNotifications.subscribe(() => {
-      updateCurrentSession(assoc("notifications_last_synced", now()))
+    const unsubUnreadNotifications = unreadNotifications.subscribe(events => {
+      if (activeTab !== "Groups") {
+        markAsSeen(events)
+      }
+    })
+
+    const unsubUnreadGroupNotifications = unreadGroupNotifications.subscribe(events => {
+      if (activeTab === "Groups") {
+        markAsSeen(events)
+      }
     })
 
     const scroller = createScroller(async () => {
@@ -77,51 +104,67 @@
     })
 
     return () => {
-      unsub()
+      unsubUnreadNotifications()
+      unsubUnreadGroupNotifications()
       scroller.stop()
     }
   })
 </script>
 
-<Content>
-  <Tabs {tabs} {activeTab} {setActiveTab}>
-    <div slot="tab" let:tab class="flex gap-2">
-      <div>{tab}</div>
-      {#if tab === tabs[2] && uncheckedOtherNotifications.length > 0}
-        <div class="h-6 rounded-full bg-gray-6 px-2">
-          {uncheckedOtherNotifications.length}
-        </div>
-      {/if}
-    </div>
-  </Tabs>
-  {#if tabs.slice(0, 2).includes(activeTab)}
-    {#each tabNotifications as notification, i (notification.key)}
-      {@const lineText = getLineText(i)}
-      {#if lineText}
-        <div class="flex items-center gap-4">
-          <small class="whitespace-nowrap text-gray-1">{lineText}</small>
-          <div class="h-px w-full bg-gray-6" />
-        </div>
-      {/if}
-      {#if !notification.event}
-        <NotificationMention {notification} />
-      {:else if activeTab === tabs[0]}
-        <NotificationReplies {notification} />
-      {:else}
-        <NotificationReactions {notification} />
-      {/if}
+<svelte:window bind:innerWidth />
+
+<Tabs tabs={displayTabs} {activeTab} {setActiveTab}>
+  <div slot="tab" let:tab class="flex gap-2">
+    <div>{tab}</div>
+    {#if tab === allTabs[0] && unreadMainNotifications.length > 0}
+      <div class="h-6 rounded-full bg-neutral-700 px-2">
+        {unreadMainNotifications.length}
+      </div>
+    {:else if tab === allTabs[1] && unreadReactionNotifications.length > 0}
+      <div class="h-6 rounded-full bg-neutral-700 px-2">
+        {unreadReactionNotifications.length}
+      </div>
+    {:else if tab === allTabs[2] && $unreadGroupNotifications.length > 0}
+      <div class="h-6 rounded-full bg-neutral-700 px-2">
+        {$unreadGroupNotifications.length}
+      </div>
+    {/if}
+  </div>
+</Tabs>
+
+{#if $session?.onboarding_tasks_completed}
+  <OnboardingTasks />
+{/if}
+
+{#if allTabs.slice(0, 2).includes(activeTab)}
+  {#each tabNotifications as notification, i (notification.key)}
+    {@const lineText = getLineText(i)}
+    {#if lineText}
+      <div class="flex items-center gap-4">
+        <small class="whitespace-nowrap text-neutral-100">{lineText}</small>
+        <div class="h-px w-full bg-neutral-600" />
+      </div>
+    {/if}
+    {#if !notification.event}
+      <NotificationMention {notification} />
+    {:else if activeTab === allTabs[0]}
+      <NotificationReplies {notification} />
     {:else}
-      <Content size="lg" class="text-center">No notifications found - check back later!</Content>
-    {/each}
+      <NotificationReactions {notification} />
+    {/if}
   {:else}
-    {#each $otherNotifications as notification, i (notification.id)}
-      {#if notification.t === "alert"}
-        <GroupAlert address={notification.group} alert={notification} />
-      {:else if notification.t === "request"}
-        <GroupRequest showGroup address={notification.group} request={notification} />
-      {/if}
+    <Content size="lg" class="text-center">No notifications found - check back later!</Content>
+  {/each}
+{:else}
+  {#each $groupNotifications.slice(0, limit) as notification, i (notification.id)}
+    {#if notification.t === "alert"}
+      <GroupAlert address={notification.group} alert={notification} />
+    {:else if notification.t === "request"}
+      <GroupRequest showGroup address={notification.group} request={notification} />
     {:else}
-      <Content size="lg" class="text-center">No notifications found - check back later!</Content>
-    {/each}
-  {/if}
-</Content>
+      <Note showGroup note={notification} />
+    {/if}
+  {:else}
+    <Content size="lg" class="text-center">No notifications found - check back later!</Content>
+  {/each}
+{/if}

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import {pluck} from "ramda"
+  import {pluck, uniq} from "ramda"
   import {formatTimestamp} from "src/util/misc"
-  import NotificationPeople from "src/app/shared/NotificationPeople.svelte"
+  import PeopleAction from "src/app/shared/PeopleAction.svelte"
   import Note from "src/app/shared/Note.svelte"
   import type {Notification} from "src/engine"
 
@@ -10,15 +10,14 @@
   const {event, interactions, timestamp} = notification
 </script>
 
-<div class="flex flex-col gap-4">
-  <div class="flex justify-between">
-    <NotificationPeople {notification} actionText="replied to your note" />
-    <small>{formatTimestamp(timestamp)}</small>
-  </div>
-  <Note
-    topLevel
-    depth={1}
-    note={event}
-    context={interactions}
-    filters={[{ids: pluck("id", interactions)}]} />
+<div class="flex items-center justify-between">
+  <PeopleAction pubkeys={uniq(pluck("pubkey", interactions))} actionText="replied to your note" />
+  <small>{formatTimestamp(timestamp)}</small>
 </div>
+
+<Note
+  topLevel
+  depth={1}
+  note={event}
+  context={interactions}
+  filters={[{ids: pluck("id", interactions)}]} />

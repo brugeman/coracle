@@ -1,7 +1,7 @@
 import {takeWhile, find, filter, identity, mergeLeft, reject, path as getPath} from "ramda"
-import {first, filterVals, updateIn} from "hurdak"
-import type {ComponentType, SvelteComponentTyped} from "svelte"
-import {buildQueryString, parseQueryString} from "src/util/misc"
+import {first, filterVals} from "hurdak"
+import logger from "src/util/logger"
+import {buildQueryString, parseQueryString, updateIn} from "src/util/misc"
 import {globalHistory} from "src/util/history"
 import {writable} from "src/engine"
 
@@ -116,8 +116,6 @@ const pickRoute = (routes, uri) => {
   return match || default_ || null
 }
 
-export type Component = ComponentType<SvelteComponentTyped>
-
 export type Serializer = {
   encode: (v: any) => string
   decode: (v: string) => any
@@ -126,24 +124,25 @@ export type Serializer = {
 export type ComponentSerializers = Record<string, Serializer>
 
 export type RegisterOpts = {
+  required?: string[]
   serializers?: ComponentSerializers
   requireUser?: boolean
+  requireSigner?: boolean
 }
 
 export type Route = RegisterOpts & {
   path: string
-  component: Component
+  component: any
 }
 
 export type RouteConfig = {
-  id?: string
+  key?: string
   mini?: boolean
   modal?: boolean
   virtual?: boolean
   noEscape?: boolean
   replace?: boolean
   context?: Record<string, any>
-  key?: string
 }
 
 export type HistoryItem = {
@@ -172,7 +171,11 @@ export const decodeQueryString = ({path, route}: HistoryItem) => {
     const v = queryParams[k]
 
     if (v) {
-      Object.assign(data, serializer.decode(v))
+      try {
+        Object.assign(data, serializer.decode(v))
+      } catch (e) {
+        logger.warn("Query string decoding failed", k, v, e)
+      }
     }
   }
 
@@ -186,7 +189,11 @@ export const decodeRouteParams = ({params, route}: HistoryItem) => {
     const v = params[k]
 
     if (v) {
-      Object.assign(data, serializer.decode(v))
+      try {
+        Object.assign(data, serializer.decode(v))
+      } catch (e) {
+        logger.warn("Route param decoding failed", k, v, e)
+      }
     }
   }
 
@@ -196,8 +203,8 @@ export const decodeRouteParams = ({params, route}: HistoryItem) => {
 export const getKey = (item: HistoryItem) => item.config.key || item.path
 
 export const getProps = (item: HistoryItem) => ({
-  ...decodeRouteParams(item),
   ...decodeQueryString(item),
+  ...decodeRouteParams(item),
   ...item.config.context,
 })
 
@@ -253,9 +260,9 @@ class RouterExtension {
     return this.clone({queryParams: data})
   }
 
-  cx = context => this.clone(updateIn("context", mergeLeft(context), this.params))
+  cx = context => this.clone(updateIn("context", mergeLeft(context))(this.params))
 
-  cg = config => this.clone(updateIn("config", mergeLeft(config), this.params))
+  cg = config => this.clone(updateIn("config", mergeLeft(config))(this.params))
 
   toString = () => {
     let path = this.path
@@ -303,12 +310,17 @@ export class Router {
 
   init() {
     this.at(window.location.pathname + window.location.search).push()
+    this.page.subscribe($page => {
+      if (!$page) {
+        logger.error("No page available")
+      }
+    })
   }
 
   listen() {
     return globalHistory.listen(({location, action}) => {
       const {pathname, search} = location
-      const [cur, prev] = this.nonVirtual.get()
+      const [cur, prev] = this.history.get()
       const path = search ? pathname + search : pathname
 
       // If we're going back, splice instead of push
@@ -322,24 +334,28 @@ export class Router {
 
   register = (
     path: string,
-    component: Component,
-    {serializers, requireUser}: RegisterOpts = {},
+    component: any,
+    {serializers, requireUser, requireSigner, required}: RegisterOpts = {},
   ) => {
-    this.routes.push({path, component, serializers, requireUser})
+    this.routes.push({path, component, required, serializers, requireUser, requireSigner})
   }
 
-  go(path, config: RouteConfig = {}) {
+  getMatch(path) {
     const match = pickRoute(this.routes, path)
 
     if (!match) {
       throw new Error(`Failed to match ${path}`)
     }
 
-    const {route, params} = match
+    return match
+  }
+
+  go(path, {replace, ...config}: RouteConfig = {}) {
+    const {route, params} = this.getMatch(path)
 
     this.history.update($history => {
       // Drop one if we're replacing
-      if (config.replace) {
+      if (replace) {
         $history.splice(0, 1)
       }
 
@@ -347,9 +363,7 @@ export class Router {
       return [{path, config, route, params}, ...$history.slice(0, 100)]
     })
 
-    if (!config.virtual) {
-      globalHistory.navigate(path, {replace: config.replace, state: null})
-    }
+    globalHistory.navigate(path, {replace, state: null})
   }
 
   pop() {
@@ -359,24 +373,25 @@ export class Router {
       return
     }
 
-    if ($history[0].config.virtual) {
-      this.history.set($history.slice(1))
-    } else {
-      window.history.back()
-    }
+    window.history.back()
   }
 
-  remove(id) {
-    this.history.update(reject(($item: HistoryItem) => $item.config.id === id))
+  remove(key) {
+    this.history.update(reject(($item: HistoryItem) => $item.config.key === key))
   }
 
   clearModals() {
     this.history.update($history => {
-      while ($history[0].config?.modal) {
+      while ($history[0]?.config?.modal) {
         $history.splice(0, 1)
       }
 
-      globalHistory.navigate($history[0].path)
+      // Make sure we don't completely clear history out
+      if ($history.length === 0) {
+        $history.push({path: "/", config: {}, ...this.getMatch("/")})
+      }
+
+      globalHistory.navigate($history[0].path || "/")
 
       return $history
     })
@@ -401,5 +416,9 @@ export class Router {
 
   fromCurrent() {
     return this.from(this.current.get())
+  }
+
+  virtual() {
+    return this.fromCurrent().cg({virtual: true})
   }
 }

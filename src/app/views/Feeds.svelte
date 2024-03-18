@@ -4,30 +4,27 @@
   import {noteKinds} from "src/util/nostr"
   import {theme} from "src/partials/state"
   import Anchor from "src/partials/Anchor.svelte"
-  import Content from "src/partials/Content.svelte"
   import Popover from "src/partials/Popover.svelte"
   import Feed from "src/app/shared/Feed.svelte"
   import {router} from "src/app/router"
   import type {DynamicFilter} from "src/engine"
-  import {session, canSign, follows, lists, userLists} from "src/engine"
+  import {session, canSign, lists, userLists} from "src/engine"
 
   export let relays = []
-  export let filter: DynamicFilter = {
-    kinds: noteKinds,
-    authors: $follows.size > 0 ? "follows" : "network",
-  }
+  export let filter: DynamicFilter = {kinds: noteKinds, authors: "follows"}
 
   let key = Math.random()
 
   const showLists = () => router.at("lists").open()
 
-  const showLogin = () => router.at("login/intro").open()
+  const showLogin = () => router.at("login").open()
 
-  const loadListFeed = naddr => {
-    const list = lists.key(naddr).get()
-    const authors = Tags.from(list).pubkeys().all()
-    const topics = Tags.from(list).topics().all()
-    const urls = Tags.from(list).urls().all()
+  const loadListFeed = address => {
+    const list = lists.key(address).get()
+    const tags = Tags.from(list.tags)
+    const authors = tags.values("p").valueOf()
+    const topics = tags.topics().valueOf()
+    const urls = tags.values("r").valueOf()
 
     if (urls.length > 0) {
       relays = urls
@@ -49,51 +46,50 @@
   document.title = "Feeds"
 </script>
 
-<Content>
-  {#if !$session}
-    <Content size="lg" class="text-center">
-      <p class="text-xl">Don't have an account?</p>
-      <p>
-        Click <Anchor class="underline" on:click={showLogin}>here</Anchor> to join the nostr network.
-      </p>
-    </Content>
-  {/if}
-  {#key key}
-    <Feed showGroup {filter} {relays}>
-      <div slot="controls">
-        {#if $canSign}
-          {#if $userLists.length > 0}
-            <Popover placement="bottom" opts={{hideOnClick: true}} theme="transparent">
-              <i slot="trigger" class="fa fa-scroll cursor-pointer p-2" />
-              <div
-                slot="tooltip"
-                class="flex flex-col items-start overflow-hidden rounded border border-solid border-gray-8 bg-black">
-                {#each $userLists as list (list.naddr)}
-                  <button
-                    class={cx("w-full px-3 py-2 text-left transition-colors", {
-                      "hover:bg-gray-7": $theme === "dark",
-                      "hover:bg-gray-1": $theme === "light",
-                    })}
-                    on:click={() => loadListFeed(list.naddr)}>
-                    <i class="fa fa-scroll fa-sm mr-1" />
-                    {list.name}
-                  </button>
-                {/each}
+{#if !$session}
+  <div class="py-16 text-center">
+    <p class="text-xl">Don't have an account?</p>
+    <p>
+      Click <Anchor class="underline" on:click={showLogin}>here</Anchor> to join the nostr network.
+    </p>
+  </div>
+{/if}
+
+{#key key}
+  <Feed skipCache showGroup {filter} {relays}>
+    <div slot="controls">
+      {#if $canSign}
+        {#if $userLists.length > 0}
+          <Popover placement="bottom" opts={{hideOnClick: true}} theme="transparent">
+            <i slot="trigger" class="fa fa-scroll cursor-pointer p-2" />
+            <div
+              slot="tooltip"
+              class="flex flex-col items-start overflow-hidden rounded border border-solid border-neutral-800 bg-black">
+              {#each $userLists as list (list.address)}
                 <button
-                  on:click={showLists}
                   class={cx("w-full px-3 py-2 text-left transition-colors", {
-                    "hover:bg-gray-7": $theme === "dark",
-                    "hover:bg-gray-1": $theme === "light",
-                  })}>
-                  <i class="fa fa-cog fa-sm mr-1" /> Customize
+                    "hover:bg-tinted-700": $theme === "dark",
+                    "hover:bg-neutral-100": $theme === "light",
+                  })}
+                  on:click={() => loadListFeed(list.address)}>
+                  <i class="fa fa-scroll fa-sm mr-1" />
+                  {list.title}
                 </button>
-              </div>
-            </Popover>
-          {:else}
-            <i class="fa fa-ellipsis-v cursor-pointer p-2" on:click={showLists} />
-          {/if}
+              {/each}
+              <button
+                on:click={showLists}
+                class={cx("w-full px-3 py-2 text-left transition-colors", {
+                  "hover:bg-tinted-700": $theme === "dark",
+                  "hover:bg-neutral-100": $theme === "light",
+                })}>
+                <i class="fa fa-cog fa-sm mr-1" /> Customize
+              </button>
+            </div>
+          </Popover>
+        {:else}
+          <i class="fa fa-ellipsis-v cursor-pointer p-2" on:click={showLists} />
         {/if}
-      </div>
-    </Feed>
-  {/key}
-</Content>
+      {/if}
+    </div>
+  </Feed>
+{/key}

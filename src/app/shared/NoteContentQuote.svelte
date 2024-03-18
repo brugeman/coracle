@@ -1,6 +1,6 @@
 <script lang="ts">
   import {onMount} from "svelte"
-  import {isShareableRelay} from "paravel"
+  import {getAddress} from "paravel"
   import {filterVals} from "hurdak"
   import {asArray} from "src/util/misc"
   import Anchor from "src/partials/Anchor.svelte"
@@ -8,15 +8,7 @@
   import Spinner from "src/partials/Spinner.svelte"
   import PersonCircle from "src/app/shared/PersonCircle.svelte"
   import {router} from "src/app/router"
-  import {
-    loadOne,
-    loadPubkeys,
-    displayPubkey,
-    isEventMuted,
-    getParentHints,
-    getIdFilters,
-    selectHints,
-  } from "src/engine"
+  import {hints, loadOne, loadPubkeys, displayPubkey, isEventMuted, getIdFilters} from "src/engine"
 
   export let note
   export let value
@@ -27,15 +19,24 @@
 
   const {id, identifier, kind, pubkey} = value
 
-  // Prioritize hints in relay selection by merging directly instead of with mergeHints
-  const hints = (value.relays || []).filter(isShareableRelay)
-  const relays = selectHints([...hints, ...getParentHints(note)])
+  const relays = hints
+    .merge([
+      hints.scenario([(value.relays || [])]),
+      hints.EventParent(note),
+    ])
+    .getUrls()
 
   const openQuote = e => {
     const noteId = value.id || quote?.id
 
     // stopPropagation wasn't working for some reason
-    if (noteId && e.detail.target.textContent !== "Show") {
+    if (e.detail.target.textContent === "Show") {
+      return
+    }
+
+    if (isGroup) {
+      router.at("groups").of(address, {relays}).at("notes").open()
+    } else if (noteId) {
       router
         .at("notes")
         .of(noteId, {relays})
@@ -47,6 +48,9 @@
   const unmute = e => {
     muted = false
   }
+
+  $: address = quote ? getAddress(quote) : ""
+  $: isGroup = address.match(/^(34550|35834):/)
 
   onMount(async () => {
     quote = await loadOne({
@@ -78,26 +82,30 @@
       </div>
     {:else if quote}
       {#if muted}
-        <p class="mb-1 py-24 text-center text-gray-5">
+        <p class="mb-1 py-24 text-center text-neutral-600">
           You have hidden this note.
           <Anchor class="underline" on:click={unmute}>Show</Anchor>
         </p>
       {:else}
-        <div class="mb-4 flex items-center gap-4">
-          <PersonCircle class="h-6 w-6" pubkey={quote.pubkey} />
-          <Anchor
-            modal
-            stopPropagation
-            type="unstyled"
-            class="flex items-center gap-2"
-            href={router.at("people").of(quote.pubkey).toString()}>
-            <h2 class="text-lg">{displayPubkey(quote.pubkey)}</h2>
-          </Anchor>
-        </div>
+        {#if !isGroup}
+          <div class="mb-4 flex items-center gap-4">
+            <PersonCircle class="h-6 w-6" pubkey={quote.pubkey} />
+            <Anchor
+              modal
+              stopPropagation
+              type="unstyled"
+              class="flex items-center gap-2"
+              href={router.at("people").of(quote.pubkey).toString()}>
+              <h2 class="text-lg">{displayPubkey(quote.pubkey)}</h2>
+            </Anchor>
+          </div>
+        {/if}
         <slot name="note-content" {quote} />
       {/if}
     {:else}
-      <p class="mb-1 py-24 text-center text-gray-5">Unable to load a preview for quoted event</p>
+      <p class="mb-1 py-24 text-center text-neutral-600">
+        Unable to load a preview for quoted event
+      </p>
     {/if}
   </Card>
 </div>

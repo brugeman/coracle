@@ -1,9 +1,67 @@
 /** @type {import('tailwindcss').Config} */
+
+const colors = {
+  black: "black",
+  white: "white",
+  transparent: "transparent",
+  accent: "var(--accent)",
+  warning: "var(--warning)",
+  success: "var(--success)",
+}
+
+const baseColors = [
+  "neutral-100",
+  "neutral-200",
+  "neutral-300",
+  "neutral-400",
+  "neutral-500",
+  "neutral-50",
+  "neutral-600",
+  "neutral-700",
+  "neutral-800",
+  "neutral-900",
+  "neutral-950",
+  "tinted-100",
+  "tinted-200",
+  "tinted-400",
+  "tinted-500",
+  "tinted-600",
+  "tinted-700",
+  "tinted-800",
+]
+
+const dynamicColors = generateVariants(baseColors)
+
+function generateVariants(baseColors) {
+  const result = {}
+
+  baseColors.forEach(baseColor => {
+    const lightKey = `${baseColor}-l`
+    const darkKey = `${baseColor}-d`
+
+    result[baseColor] = `var(--${baseColor})`
+    result[lightKey] = `var(--${lightKey})`
+    result[darkKey] = `var(--${darkKey})`
+  })
+
+  return result
+}
+
 module.exports = {
   content: ["./index.html", "./src/**/*.{js,svelte}"],
+  darkMode: "class",
   safelist: ["w-4", "h-4"],
   theme: {
     extend: {},
+    zIndex: {
+      none: 0,
+      feature: 1,
+      nav: 2,
+      chat: 3,
+      popover: 4,
+      modal: 5,
+      toast: 6,
+    },
     screens: {
       xs: "400px",
       sm: "640px",
@@ -13,26 +71,8 @@ module.exports = {
       "2xl": "1536px",
     },
     colors: {
-      transparent: "var(--transparent)",
-      black: "var(--black)",
-      white: "var(--white)",
-      accent: "var(--accent)",
-      "accent-light": "var(--accent-light)",
-      input: "var(--input)",
-      "input-hover": "var(--input-hover)",
-      "gray-0": "var(--gray-0)",
-      "gray-1": "var(--gray-1)",
-      "gray-2": "var(--gray-2)",
-      "gray-3": "var(--gray-3)",
-      "gray-4": "var(--gray-4)",
-      "gray-5": "var(--gray-5)",
-      "gray-6": "var(--gray-6)",
-      "gray-7": "var(--gray-7)",
-      "gray-8": "var(--gray-8)",
-      "gray-9": "var(--gray-9)",
-      danger: "var(--danger)",
-      warning: "var(--warning)",
-      success: "var(--success)",
+      ...colors,
+      ...dynamicColors,
     },
   },
   plugins: [],

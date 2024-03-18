@@ -9,12 +9,14 @@ export const getDefaultSettings = () => ({
   hide_sensitive: true,
   report_analytics: true,
   auto_authenticate: false,
-  min_wot_score: 1,
+  min_wot_score: 0,
   enable_reactions: true,
+  enable_client_tag: false,
   nip96_urls: env.get().NIP96_URLS.slice(0, 1),
   imgproxy_url: env.get().IMGPROXY_URL,
   dufflepud_url: env.get().DUFFLEPUD_URL,
   multiplextr_url: env.get().MULTIPLEXTR_URL,
+  platform_zap_split: env.get().PLATFORM_ZAP_SPLIT,
 })
 
 export const getSettings = () => {
@@ -31,6 +33,8 @@ export const imgproxy = (url: string, {w = 640, h = 1024} = {}) => {
   if (!url || url.match("gif$")) {
     return url
   }
+
+  url = url.split("?")[0]
 
   try {
     return base && url ? `${base}/x/s:${w}:${h}/${btoa(url)}` : url

@@ -1,13 +1,17 @@
 import {uniqBy, identity, prop, sortBy} from "ramda"
 import {batch} from "hurdak"
-import {Tags} from "paravel"
+import {Tags, getIdOrAddress, getIdAndAddress} from "paravel"
 import type {DisplayEvent} from "src/engine/notes/model"
 import type {Event} from "src/engine/events/model"
 import {writable} from "src/engine/core/utils"
-import {selectHints} from "src/engine/relays/utils"
-import {getIds} from "src/engine/events/utils"
+import {hints} from "src/engine/relays/utils"
 import {getIdFilters} from "./filters"
 import {load} from "./load"
+
+const getAncestorIds = e =>
+  Tags.from(Object.values(Tags.fromEvent(e).ancestors()).flatMap(tags => tags.valueOf()))
+    .values()
+    .valueOf()
 
 export class ThreadLoader {
   stopped = false
@@ -15,8 +19,11 @@ export class ThreadLoader {
   ancestors = writable<DisplayEvent[]>([])
   root = writable<DisplayEvent>(null)
 
-  constructor(readonly note: Event, readonly relays: string[]) {
-    this.loadNotes(Tags.from(note).type(["e", "a"]).values().all())
+  constructor(
+    readonly note: Event,
+    readonly relays: string[],
+  ) {
+    this.loadNotes(getAncestorIds(note))
   }
 
   stop() {
@@ -28,16 +35,16 @@ export class ThreadLoader {
       return
     }
 
-    const seen = new Set(this.getThread().flatMap(getIds))
+    const seen = new Set(this.getThread().flatMap(getIdAndAddress))
     const filteredIds = ids.filter(id => id && !seen.has(id))
 
     if (filteredIds.length > 0) {
       load({
-        relays: selectHints(this.relays),
+        relays: hints.scenario([this.relays]).getUrls(),
         filters: getIdFilters(filteredIds),
         onEvent: batch(300, (events: Event[]) => {
           this.addToThread(events)
-          this.loadNotes(events.flatMap(e => Tags.from(e).type(["e", "a"]).values().all()))
+          this.loadNotes(events.flatMap(getAncestorIds))
         }),
       })
     }
@@ -52,13 +59,15 @@ export class ThreadLoader {
   }
 
   addToThread(events) {
-    const tags = Tags.from(this.note).normalize()
     const ancestors = []
+    const {roots, replies} = Tags.fromEvent(this.note).ancestors()
 
     for (const event of events) {
-      if (event.id === tags.getReply()) {
+      const ids = getIdOrAddress(event)
+
+      if (replies.find(t => ids.includes(t.value()))) {
         this.parent.set(event)
-      } else if (event.id === tags.getRoot()) {
+      } else if (roots.find(t => ids.includes(t.value()))) {
         this.root.set(event)
       } else {
         ancestors.push(event)
@@ -67,7 +76,7 @@ export class ThreadLoader {
 
     if (ancestors.length > 0) {
       this.ancestors.update($xs =>
-        sortBy(prop("created_at"), uniqBy(prop("id"), ancestors.concat($xs)))
+        sortBy(prop("created_at"), uniqBy(prop("id"), ancestors.concat($xs))),
       )
     }
   }

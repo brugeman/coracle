@@ -1,7 +1,9 @@
 <script lang="ts">
   import cx from "classnames"
   import {createEventDispatcher} from "svelte"
+  import AltColor from "src/partials/AltColor.svelte"
 
+  export let noPad = false
   export let interactive = false
   export let stopPropagation = false
 
@@ -24,28 +26,29 @@
       e.stopPropagation()
     }
 
-    const {x, y, t} = getClick(e)
-    const h = Math.sqrt(Math.pow(click.x - x, 2) + Math.pow(click.y - y, 2))
+    const newClick = getClick(e)
 
-    if (t - click.t < 1000 && h < 20) {
+    if (newClick && click) {
+      const {x, y, t} = newClick
+      const h = Math.sqrt(Math.pow(click.x - x, 2) + Math.pow(click.y - y, 2))
+
+      if (t - click.t < 1000 && h < 20) {
+        dispatch("click", e)
+      }
+    } else {
       dispatch("click", e)
     }
   }
 </script>
 
-<div
-  on:mousedown={startClick}
-  on:touchstart={startClick}
-  on:click={onClick}
-  class={cx(
-    $$props.class,
-    "card group rounded-2xl border border-solid border-gray-6 bg-gray-7 p-3 text-gray-2",
-    "group-[.modal]:border group-[.modal]:border-solid group-[.modal]:border-gray-6 group-[.modal]:bg-gray-8",
-    "group-[.card]:border group-[.card]:border-solid group-[.card]:border-gray-6 group-[.card]:bg-gray-8",
-    {
-      "cursor-pointer transition-all hover:bg-gray-8 group-[.card]:hover:bg-gray-7 group-[.modal]:hover:bg-gray-7":
+<div on:mousedown={startClick} on:touchstart={startClick} on:click={onClick}>
+  <AltColor
+    background
+    class={cx($$props.class, "rounded text-neutral-100", {
+      "px-7 py-5": !noPad,
+      "cursor-pointer border-r-4 border-transparent transition-colors hover:border-neutral-600":
         interactive,
-    }
-  )}>
-  <slot />
+    })}>
+    <slot />
+  </AltColor>
 </div>

@@ -1,18 +1,20 @@
 <script lang="ts">
+  import {Tags} from "paravel"
   import Card from "src/partials/Card.svelte"
   import Chip from "src/partials/Chip.svelte"
   import Anchor from "src/partials/Anchor.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import GroupCircle from "src/app/shared/GroupCircle.svelte"
   import GroupName from "src/app/shared/GroupName.svelte"
   import PersonBadgeSmall from "src/app/shared/PersonBadgeSmall.svelte"
-  import {groupRequests} from "src/engine"
+  import {groupRequests, loadPubkeys} from "src/engine"
   import {router} from "src/app/router"
 
   export let address
   export let request
   export let showGroup = false
 
+  const claim = Tags.fromEvent(request).get("claim")?.value()
   const dismiss = () => groupRequests.key(request.id).merge({resolved: true})
 
   const resolve = () => {
@@ -34,10 +36,12 @@
         .open()
     }
   }
+
+  loadPubkeys([request.pubkey])
 </script>
 
 <Card interactive>
-  <Content>
+  <FlexColumn>
     <div class="flex items-center justify-between">
       <p class="text-xl">
         {#if request.kind === 25}
@@ -47,11 +51,11 @@
         {/if}
       </p>
       <div class="hidden gap-2 sm:flex">
-        <Anchor on:click={dismiss} theme="button">Dismiss</Anchor>
-        <Anchor on:click={resolve} theme="button-accent">Resolve</Anchor>
+        <Anchor on:click={dismiss} button>Dismiss</Anchor>
+        <Anchor on:click={resolve} button accent>Resolve</Anchor>
       </div>
     </div>
-    <p class="border-l-2 border-solid border-gray-5 pl-2">
+    <p class="border-l-2 border-solid border-neutral-600 pl-2">
       "{request.content}"
     </p>
     <p>
@@ -73,9 +77,12 @@
         the group.
       {/if}
     </p>
+    {#if claim}
+      <p>Claim: "{claim}"</p>
+    {/if}
     <div class="flex gap-2 sm:hidden">
-      <Anchor on:click={dismiss} theme="button">Dismiss</Anchor>
-      <Anchor on:click={resolve} theme="button-accent">Resolve</Anchor>
+      <Anchor on:click={dismiss} button>Dismiss</Anchor>
+      <Anchor on:click={resolve} button accent>Resolve</Anchor>
     </div>
-  </Content>
+  </FlexColumn>
 </Card>

@@ -1,73 +1,42 @@
 import {join} from "ramda"
+import {nip44} from "nostr-tools"
 import {cached} from "paravel"
-import {base64} from "@scure/base"
-import {randomBytes} from "@noble/hashes/utils"
-import {secp256k1} from "@noble/curves/secp256k1"
-import {sha256} from "@noble/hashes/sha256"
-import {xchacha20} from "@noble/ciphers/chacha"
 import {switcherFn} from "hurdak"
 import type {Session} from "src/engine/session/model"
-
-export const utf8Decoder = new TextDecoder()
-
-export const utf8Encoder = new TextEncoder()
+import type {Connect} from "./connect"
+import {withExtension} from "./nip07"
 
 // Deriving shared secret is an expensive computation, cache it
 export const getSharedSecret = cached({
   maxSize: 100,
   getKey: join(":"),
-  getValue: ([sk, pk]: string[]) =>
-    sha256(secp256k1.getSharedSecret(sk, "02" + pk).subarray(1, 33)),
+  getValue: ([sk, pk]: string[]) => nip44.v2.utils.getConversationKey(sk, pk),
 })
 
-export function encryptWithSharedSecret(key: Uint8Array, text: string, v = 1) {
-  if (v !== 1) {
-    throw new Error("NIP44: unknown encryption version")
-  }
-
-  const nonce = randomBytes(24)
-  const plaintext = utf8Encoder.encode(text)
-  const ciphertext = xchacha20(key, nonce, plaintext)
-
-  const payload = new Uint8Array(25 + ciphertext.length)
-  payload.set([v], 0)
-  payload.set(nonce, 1)
-  payload.set(ciphertext, 25)
-
-  return base64.encode(payload)
-}
-
-export function decryptWithSharedSecret(key: Uint8Array, payload: string) {
-  const data = base64.decode(payload)
-
-  if (data[0] !== 1) {
-    throw new Error(`NIP44: unknown encryption version: ${data[0]}`)
-  }
-
-  const nonce = data.slice(1, 25)
-  const ciphertext = data.slice(25)
-  const plaintext = xchacha20(key, nonce, ciphertext)
-
-  return utf8Decoder.decode(plaintext)
-}
-
-export function encryptFor(sk: string, pk: string, text: string, v = 1) {
-  return encryptWithSharedSecret(getSharedSecret(sk, pk), text, v)
-}
-
-export function decryptFor(sk: string, pk: string, payload: string) {
-  return decryptWithSharedSecret(getSharedSecret(sk, pk), payload)
-}
-
 export class Nip44 {
-  constructor(readonly session: Session) {}
+  constructor(
+    readonly session: Session,
+    readonly connect: Connect,
+  ) {}
+
+  isEnabled() {
+    if (["privkey", "connect"].includes(this.session?.method)) {
+      return true
+    }
+
+    if (this.session?.method === "extension") {
+      return Boolean((window as any).nostr?.nip44)
+    }
+
+    return false
+  }
 
   encrypt(message: string, pk: string, sk: string) {
-    return encryptFor(sk, pk, message)
+    return nip44.v2.encrypt(message, getSharedSecret(sk, pk))
   }
 
-  decrypt(message: string, pk: string, sk: string) {
-    return decryptFor(sk, pk, message)
+  decrypt(payload: string, pk: string, sk: string) {
+    return nip44.v2.decrypt(payload, getSharedSecret(sk, pk))
   }
 
   encryptAsUser(message: string, pk: string) {
@@ -75,6 +44,8 @@ export class Nip44 {
 
     return switcherFn(method, {
       privkey: () => this.encrypt(message, pk, privkey),
+      extension: () => withExtension(ext => ext.nip44.encrypt(pk, message)),
+      connect: () => this.connect.broker.nip44Encrypt(pk, message),
     })
   }
 
@@ -83,6 +54,8 @@ export class Nip44 {
 
     return switcherFn(method, {
       privkey: () => this.decrypt(message, pk, privkey),
+      extension: () => withExtension(ext => ext.nip44.decrypt(pk, message)),
+      connect: () => this.connect.broker.nip44Decrypt(pk, message),
     })
   }
 }

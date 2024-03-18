@@ -1,26 +1,32 @@
-import {uniq, mergeRight, assoc} from "ramda"
-import {Tags} from "paravel"
-import {updateIn} from "hurdak"
-import {getPublicKey} from "nostr-tools"
-import {Naddr, LOCAL_RELAY_URL} from "src/util/nostr"
+import {uniq, assoc, whereEq, sortBy, prop, without, mergeRight} from "ramda"
+import {Tags, decodeAddress, getAddress} from "paravel"
+import {switcherFn, batch} from "hurdak"
+import {LOCAL_RELAY_URL, giftWrapKinds, getPublicKey} from "src/util/nostr"
 import {projections} from "src/engine/core/projections"
+import {updateStore} from "src/engine/core/commands"
 import type {Event} from "src/engine/events/model"
-import {EventKind} from "src/engine/events/model"
 import {sessions} from "src/engine/session/state"
 import {nip59} from "src/engine/session/derived"
-import {getExecutor} from "src/engine/network/utils"
-import {GroupAccess, MemberAccess} from "./model"
-import {groups, groupSharedKeys, groupRequests, groupAlerts} from "./state"
-import {deriveAdminKeyForGroup, getRecipientKey} from "./utils"
-import {modifyGroupStatus, setGroupStatus} from "./commands"
+import {getExecutor, getIdFilters, load} from "src/engine/network/utils"
+import {hints} from "src/engine/relays/utils"
+import {GroupAccess} from "./model"
+import {groups, groupSharedKeys, groupAdminKeys, groupRequests, groupAlerts} from "./state"
+import {
+  deriveAdminKeyForGroup,
+  getRecipientKey,
+  deriveGroupStatus,
+  getUserCommunities,
+} from "./utils"
+import {setGroupStatus, modifyGroupStatus} from "./commands"
 
 // Key sharing
 
 projections.addHandler(24, (e: Event) => {
-  const tags = Tags.from(e)
-  const privkey = tags.getValue("privkey")
-  const address = tags.getValue("a")
-  const recipient = Tags.from(e.wrap).getValue("p")
+  const tags = Tags.fromEvent(e)
+  const privkey = tags.get("privkey")?.value()
+  const address = tags.get("a")?.value()
+  const recipient = Tags.fromEvent(e.wrap).get("p")?.value()
+  const relays = tags.values("relay").valueOf()
 
   if (!address) {
     return
@@ -28,56 +34,122 @@ projections.addHandler(24, (e: Event) => {
 
   if (privkey) {
     const pubkey = getPublicKey(privkey)
+    const role = tags.get("role")?.value()
+    const keys = role === "admin" ? groupAdminKeys : groupSharedKeys
 
-    groupSharedKeys.key(pubkey).update($key => ({
+    keys.key(pubkey).update($key => ({
       pubkey,
       privkey,
       group: address,
       created_at: e.created_at,
-      hints: tags.type("relay").values().all(),
-      members: [],
+      hints: relays,
       ...$key,
     }))
+
+    // Notify the user if this isn't just a key rotation
+    if (deriveGroupStatus(address).get()?.access !== GroupAccess.Granted) {
+      groupAlerts.key(e.id).set({...e, group: address, type: "invite"})
+    }
+
+    // Load the group's metadata and posts
+    load({
+      relays: hints.scenario([relays]).getUrls(),
+      filters: [
+        ...getIdFilters([address]),
+        {kinds: giftWrapKinds, "#p": [pubkey]},
+        {kinds: giftWrapKinds, authors: [pubkey]},
+      ],
+    })
+  } else {
+    groupAlerts.key(e.id).set({...e, group: address, type: "exit"})
   }
 
-  groupAlerts.key(e.id).set({
-    ...e,
-    group: address,
-    type: privkey ? "invite" : "exit",
-  })
+  if (relays.length > 0) {
+    const {pubkey, identifier} = decodeAddress(address)
+
+    if (!groups.key(address).get()) {
+      groups.key(address).set({address, pubkey, id: identifier, relays})
+    }
+  }
 
   setGroupStatus(recipient, address, e.created_at, {
-    access: privkey ? MemberAccess.Granted : MemberAccess.Revoked,
+    access: privkey ? GroupAccess.Granted : GroupAccess.Revoked,
   })
 })
 
 // Group metadata
 
-projections.addHandler(34550, (e: Event) => {
-  const tags = Tags.from(e)
-  const meta = tags.getDict()
-  const address = Naddr.fromEvent(e).asTagValue()
+projections.addHandler(35834, (e: Event) => {
+  const tags = Tags.fromEvent(e)
+  const meta = tags.asObject()
+  const address = getAddress(e)
   const group = groups.key(address)
 
-  if (group.get()?.updated_at > e.created_at) {
-    return
-  }
+  group.merge({address, id: meta.d, pubkey: e.pubkey})
 
-  group.set({
-    address,
-    id: meta.d,
-    pubkey: e.pubkey,
-    updated_at: e.created_at,
-    access: meta.access || GroupAccess.Open,
-    relays: tags.type("relay").values().all(),
-    name: meta.name,
-    image: meta.image,
-    description: meta.description,
-    moderators: tags.mark("moderator").values().all(),
+  updateStore(group, e.created_at, {
+    relays: tags.values("relay").valueOf(),
+    listing_is_public: !e.wrap,
+    meta: {
+      name: meta.name,
+      about: meta.about,
+      banner: meta.banner,
+      picture: meta.picture,
+    },
   })
 })
 
-// Public community membership
+projections.addHandler(34550, (e: Event) => {
+  const tags = Tags.fromEvent(e)
+  const meta = tags.asObject()
+  const address = getAddress(e)
+  const group = groups.key(address)
+
+  group.merge({address, id: meta.d, pubkey: e.pubkey})
+
+  updateStore(group, e.created_at, {
+    relays: tags.values("relay").valueOf(),
+    listing_is_public: true,
+    meta: {
+      name: meta.name,
+      about: meta.description,
+      banner: meta.image,
+      picture: meta.image,
+    },
+  })
+})
+
+projections.addHandler(27, (e: Event) => {
+  const address = Tags.fromEvent(e).groups().values().first()
+
+  if (!address) {
+    return
+  }
+
+  let {members = [], recent_member_updates = []} = groups.key(address).get() || {}
+
+  // Only replay updates if we have something new
+  if (!recent_member_updates.find(whereEq({id: e.id}))) {
+    recent_member_updates = sortBy(prop("created_at"), recent_member_updates.concat(e)).slice(-100)
+
+    for (const event of recent_member_updates) {
+      const tags = Tags.fromEvent(event)
+      const op = tags.get("op")?.value()
+      const pubkeys = tags.values("p").valueOf()
+
+      members = switcherFn(op, {
+        add: () => uniq(pubkeys.concat(members)),
+        remove: () => without(pubkeys, members),
+        set: () => pubkeys,
+        default: () => members,
+      })
+    }
+
+    groups.key(address).merge({members, recent_member_updates})
+  }
+})
+
+// Membership access/exit requests
 
 projections.addHandler(10004, (e: Event) => {
   let $session = sessions.get()[e.pubkey]
@@ -86,9 +158,9 @@ projections.addHandler(10004, (e: Event) => {
     return
   }
 
-  const addresses = Tags.from(e).communities().all()
+  const addresses = Tags.fromEvent(e).communities().values().valueOf()
 
-  for (const address of uniq(Object.keys($session.groups || {}).concat(addresses))) {
+  for (const address of uniq(Object.keys($session.groups?.values || {}).concat(addresses))) {
     $session = modifyGroupStatus($session, address, e.created_at, {
       joined: addresses.includes(address),
     })
@@ -97,10 +169,8 @@ projections.addHandler(10004, (e: Event) => {
   sessions.update(assoc(e.pubkey, $session))
 })
 
-// Membership access/exit requests
-
 const handleGroupRequest = access => (e: Event) => {
-  const address = Tags.from(e).getValue("a")
+  const address = Tags.fromEvent(e).get("a")?.value()
   const adminKey = deriveAdminKeyForGroup(address)
 
   if (adminKey.get()) {
@@ -109,7 +179,7 @@ const handleGroupRequest = access => (e: Event) => {
         ...e,
         group: address,
         resolved: false,
-      })
+      }),
     )
   }
 
@@ -118,32 +188,45 @@ const handleGroupRequest = access => (e: Event) => {
   }
 }
 
-projections.addHandler(25, handleGroupRequest(MemberAccess.Requested))
+projections.addHandler(25, handleGroupRequest(GroupAccess.Requested))
 
-projections.addHandler(26, handleGroupRequest(MemberAccess.None))
+projections.addHandler(26, handleGroupRequest(GroupAccess.None))
 
 // All other events are messages sent to the group
 
-projections.addGlobalHandler((e: Event) => {
-  if (!e.wrap) {
-    return
-  }
+projections.addGlobalHandler(
+  batch(300, (events: Event[]) => {
+    const userGroups = new Set(Object.values(sessions.get()).flatMap(getUserCommunities))
 
-  const sharedKey = groupSharedKeys.key(e.wrap.pubkey)
+    for (const e of events) {
+      // Publish the unwrapped event to our local relay so active subscriptions get notified
+      if (e.wrap && groupSharedKeys.key(e.wrap.pubkey).exists()) {
+        getExecutor([LOCAL_RELAY_URL]).publish(e)
+      }
 
-  if (sharedKey.exists()) {
-    // Publish the unwrapped event to our local relay so active subscriptions get notified
-    getExecutor([LOCAL_RELAY_URL]).publish(e)
+      const addresses = Tags.fromEvent(e).communities().values().valueOf()
 
-    sharedKey.update(
-      updateIn("members", (members?: string[]) => uniq([...(members || []), e.pubkey]))
-    )
-  }
-})
+      // Save events with communities the user is a part of to our local db
+      if (addresses.some(a => userGroups.has(a))) {
+        getExecutor([LOCAL_RELAY_URL]).publish(e)
+      }
+    }
+  }),
+)
 
 // Unwrap gift wraps using known keys
 
-projections.addHandler(EventKind.GiftWrap, wrap => {
+projections.addHandler(1059, wrap => {
+  const sk = getRecipientKey(wrap)
+
+  if (sk) {
+    nip59.get().withUnwrappedEvent(wrap, sk, rumor => {
+      projections.push(rumor)
+    })
+  }
+})
+
+projections.addHandler(1060, wrap => {
   const sk = getRecipientKey(wrap)
 
   if (sk) {

@@ -3,10 +3,10 @@ import {flatten, uniq, path as getPath} from "ramda"
 import {defer, batch} from "hurdak"
 import {pushToKey} from "src/util/misc"
 import {LOCAL_RELAY_URL} from "src/util/nostr"
-import {info} from "src/util/logger"
+import logger from "src/util/logger"
 import {getSetting} from "src/engine/session/utils"
 import type {Event} from "src/engine/events/model"
-import {mergeHints} from "src/engine/relays/utils"
+import {hints} from "src/engine/relays/utils"
 import type {Filter} from "../model"
 import {combineFilters} from "./filters"
 import {subscribe} from "./subscribe"
@@ -32,7 +32,7 @@ export type LoadItem = {
 
 const loadChunk = (chunk, relays, tracker) => {
   const filters = combineFilters(chunk.flatMap(getPath(["request", "filters"])))
-  const sub = subscribe({relays, filters, timeout: 15000, skipCache: true})
+  const sub = subscribe({relays, filters, timeout: 15000, skipCache: true, closeOnEose: true})
 
   const chunkResults = []
   for (const item of chunk) {
@@ -83,15 +83,13 @@ export const execute = batch(500, (items: LoadItem[]) => {
     return
   }
 
-  info(`Loading ${items.length} grouped requests`, {filters, relays})
+  logger.info(`Loading ${items.length} grouped requests`, {filters, relays})
 
   const tracker = new Tracker()
 
   // If we're using multiplexer, let it do its thing
   if (getSetting("multiplextr_url")) {
-    const relays = mergeHints(items.map(getPath(["request", "relays"])))
-
-    loadChunk(items, relays, tracker)
+    loadChunk(items, hints.scenario(items.map(getPath(["request", "relays"]))).getUrls(), tracker)
   } else {
     const itemsByRelay = {}
     for (const item of items) {

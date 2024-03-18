@@ -1,12 +1,12 @@
 <script lang="ts">
   import {Capacitor} from "@capacitor/core"
-  import {toHex} from "src/util/nostr"
+  import {isKeyValid, toHex} from "src/util/nostr"
   import {toast, appName} from "src/partials/state"
   import Input from "src/partials/Input.svelte"
   import Anchor from "src/partials/Anchor.svelte"
   import Content from "src/partials/Content.svelte"
   import Heading from "src/partials/Heading.svelte"
-  import {isKeyValid, loginWithPrivateKey} from "src/engine"
+  import {loginWithPrivateKey} from "src/engine"
   import {boot} from "src/app/state"
 
   let nsec = ""
@@ -19,7 +19,7 @@
       loginWithPrivateKey(privkey)
       boot()
     } else {
-      toast.show("error", "Sorry, but that's an invalid private key.")
+      toast.show("warning", "Sorry, but that's an invalid private key.")
     }
   }
 </script>
@@ -29,14 +29,16 @@
   <p>To give {appName} full access to your nostr identity, enter your private key below.</p>
   <div class="flex gap-2">
     <div class="flex-grow">
-      <Input type="password" bind:value={nsec} placeholder="nsec...">
+      <Input type="password" bind:value={nsec} placeholder="nsec..." class="rounded-full">
         <i slot="before" class="fa fa-key" />
       </Input>
     </div>
-    <Anchor theme="button" class="cy-login-submit" on:click={logIn}>Log In</Anchor>
+    <Anchor circle button accent tall class="cy-login-submit" on:click={logIn}>
+      <i class="fa fa-right-to-bracket" />
+    </Anchor>
   </div>
   {#if !Capacitor.isNativePlatform()}
-    <p class="rounded border-2 border-solid border-warning bg-gray-8 px-6 py-3">
+    <p class="rounded border-2 border-solid border-warning bg-neutral-800 px-6 py-3">
       Note that sharing your private key directly is not recommended, instead you should use a <Anchor
         href={nip07}
         external>compatible browser extension</Anchor> to securely store your key.

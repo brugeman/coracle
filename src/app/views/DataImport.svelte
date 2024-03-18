@@ -1,17 +1,16 @@
 <script lang="ts">
   import {sleep} from "hurdak"
   import {error} from "src/util/logger"
+  import {isGiftWrap} from "src/util/nostr"
   import {appName, toast} from "src/partials/state"
   import Field from "src/partials/Field.svelte"
   import Input from "src/partials/Input.svelte"
   import Anchor from "src/partials/Anchor.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Heading from "src/partials/Heading.svelte"
   import {router} from "src/app/router"
   import type {Event} from "src/engine"
-  import {_events, EventKind, projections} from "src/engine"
-
-  const encryptedKinds = [EventKind.Nip04Message, EventKind.GiftWrap]
+  import {_events, projections} from "src/engine"
 
   const setFile = e => {
     file = e.target.files[0]
@@ -19,7 +18,7 @@
 
   const submit = () => {
     if (!file) {
-      toast.show("error", "Please select a file to import.")
+      toast.show("warning", "Please select a file to import.")
 
       return
     }
@@ -41,7 +40,7 @@
 
           projections.push(event)
 
-          if (!encryptedKinds.includes(event.kind)) {
+          if (!isGiftWrap(event)) {
             _events.key(event.id).set(event)
           }
         }
@@ -56,7 +55,7 @@
       } catch (e) {
         error(e)
 
-        toast.show("error", "Something went wrong!")
+        toast.show("warning", "Something went wrong!")
       }
 
       loading = false
@@ -69,7 +68,7 @@
 </script>
 
 <form on:submit|preventDefault={submit}>
-  <Content>
+  <FlexColumn>
     <div class="mb-4 flex flex-col items-center justify-center">
       <Heading>Import Data</Heading>
       <p>Populate {appName}'s database with a nostr export file</p>
@@ -82,8 +81,7 @@
           uncompressed version.
         </p>
       </Field>
-      <Anchor {loading} tag="button" theme="button" type="submit" class="text-center"
-        >Import</Anchor>
+      <Anchor {loading} button tag="button" type="submit" class="text-center">Import</Anchor>
     </div>
-  </Content>
+  </FlexColumn>
 </form>

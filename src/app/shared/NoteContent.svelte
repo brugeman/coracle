@@ -14,12 +14,16 @@
   import NoteContentKind30009 from "src/app/shared/NoteContentKind30009.svelte"
   import NoteContentKind30023 from "src/app/shared/NoteContentKind30023.svelte"
   import NoteContentKind30311 from "src/app/shared/NoteContentKind30311.svelte"
+  import NoteContentKind30402 from "src/app/shared/NoteContentKind30402.svelte"
   import NoteContentKind31337 from "src/app/shared/NoteContentKind31337.svelte"
+  import NoteContentKind31923 from "src/app/shared/NoteContentKind31923.svelte"
   import NoteContentKind32123 from "src/app/shared/NoteContentKind32123.svelte"
+  import NoteContentKind34550 from "src/app/shared/NoteContentKind34550.svelte"
+  import NoteContentKind35834 from "src/app/shared/NoteContentKind35834.svelte"
   import {getSetting} from "src/engine"
 
   export let note
-  export let anchorId = null
+  export let isQuote = false
   export let maxLength = 700
   export let showEntire = false
   export let expandable = true
@@ -33,11 +37,11 @@
 </script>
 
 {#if warning}
-  <div class="flex gap-2 text-gray-4">
+  <div class="flex gap-2 text-neutral-300">
     <i class="fa fa-warning m-1" />
     <p>
       This note has been flagged by the author as "{warning}".<br />
-      <Anchor theme="anchor" on:click={ignoreWarning}>Show anyway</Anchor>
+      <Anchor underline on:click={ignoreWarning}>Show anyway</Anchor>
     </p>
   </div>
 {:else if note.kind === 0}
@@ -47,13 +51,13 @@
 {:else if [40, 41].includes(note.kind)}
   <NoteContentKind40 {note} />
 {:else if note.kind === 1808}
-  <NoteContentKind1808 {note} {anchorId} {maxLength} {showEntire} />
+  <NoteContentKind1808 {note} {maxLength} {showEntire} />
 {:else if note.kind === 1985}
-  <NoteContentKind1985 {note} {anchorId} {maxLength} {showEntire} />
+  <NoteContentKind1985 {note} {maxLength} {showEntire} />
 {:else if note.kind === 1986}
-  <NoteContentKind1986 {note} {anchorId} {maxLength} {showEntire} />
+  <NoteContentKind1986 {note} {maxLength} {showEntire} />
 {:else if note.kind === 9802}
-  <NoteContentKind9802 {note} {anchorId} {maxLength} {showEntire} {showMedia} />
+  <NoteContentKind9802 {note} {maxLength} {showEntire} {showMedia} />
 {:else if note.kind === 1063}
   <NoteContentKind1063 {note} {showMedia} />
 {:else if note.kind === 10002}
@@ -64,14 +68,22 @@
   <NoteContentKind30023 {note} {showEntire} {showMedia} />
 {:else if note.kind === 30311}
   <NoteContentKind30311 {note} {showMedia} />
+{:else if note.kind === 30402}
+  <NoteContentKind30402 {note} {showEntire} {showMedia} />
 {:else if note.kind === 31337}
   <NoteContentKind31337 {note} {showMedia} />
+{:else if note.kind === 31923}
+  <NoteContentKind31923 {note} />
 {:else if note.kind === 32123}
   <NoteContentKind32123 {note} />
+{:else if note.kind === 34550}
+  <NoteContentKind34550 {note} />
+{:else if note.kind === 35834}
+  <NoteContentKind35834 {note} />
 {:else}
-  <NoteContentKind1 {note} {anchorId} {maxLength} {showEntire} {showMedia} {expandable}>
+  <NoteContentKind1 {note} {maxLength} {showEntire} {showMedia} {expandable} {isQuote}>
     <div slot="note-content" let:quote>
-      <svelte:self note={quote} {anchorId} {maxLength} />
+      <svelte:self isQuote note={quote} {maxLength} />
     </div>
   </NoteContentKind1>
 {/if}

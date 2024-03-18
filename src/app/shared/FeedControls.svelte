@@ -1,9 +1,8 @@
 <script lang="ts">
   import {pluck, not, prop, equals, omit, objOf} from "ramda"
   import {displayList} from "hurdak"
-  import {createLocalDate, fuzzy, formatTimestampAsDate} from "src/util/misc"
+  import {createLocalDate, dateToSeconds, fuzzy, formatTimestampAsDate} from "src/util/misc"
   import {noteKinds} from "src/util/nostr"
-  import {getKey} from "src/util/router"
   import Chip from "src/partials/Chip.svelte"
   import Menu from "src/partials/Menu.svelte"
   import MenuItem from "src/partials/MenuItem.svelte"
@@ -15,7 +14,7 @@
   import Modal from "src/partials/Modal.svelte"
   import Content from "src/partials/Content.svelte"
   import SelectButton from "src/partials/SelectButton.svelte"
-  import MultiSelect from "src/partials/MultiSelect.svelte"
+  import SearchSelect from "src/partials/SearchSelect.svelte"
   import PersonMultiSelect from "src/app/shared/PersonMultiSelect.svelte"
   import {router} from "src/app/router"
   import type {DynamicFilter, Topic, Person} from "src/engine"
@@ -52,6 +51,8 @@
     {kind: 9802, label: "Highlights"},
     {kind: 10002, label: "Relay selections"},
     {kind: 30023, label: "Long form content"},
+    {kind: 31923, label: "Calendar Event"},
+    {kind: 30402, label: "Classified Listing"},
   ]
 
   const searchKinds = fuzzy(kinds, {keys: ["kind", "label"]})
@@ -62,11 +63,9 @@
   const displayTopics = topics => (topics.length === 1 ? topics[0] : `${topics.length} topics`)
 
   const onChange = filter => {
-    onEscape()
-
-    const key = getKey(router.current.get())
-
-    router.fromCurrent().qp({filter}).replace({key})
+    if (isOpen) {
+      router.pop()
+    }
 
     updateFilter(filter)
   }
@@ -95,11 +94,11 @@
     }
 
     if (_filter.since) {
-      newFilter.since = createLocalDate(_filter.since).setHours(0, 0, 0, 0) / 1000
+      newFilter.since = dateToSeconds(createLocalDate(_filter.since).setHours(0, 0, 0, 0))
     }
 
     if (_filter.until) {
-      newFilter.until = createLocalDate(_filter.until).setHours(23, 59, 59, 0) / 1000
+      newFilter.until = dateToSeconds(createLocalDate(_filter.until).setHours(23, 59, 59, 0))
     }
 
     if (_filter.search) {
@@ -174,14 +173,13 @@
   }
 </script>
 
-<div>
+<div class="-mb-2">
   <div class="float-right flex justify-end">
-    <div class="flex items-center gap-1 pr-2">
+    <div class="flex items-center gap-1 px-2">
       <Toggle scale={0.6} value={!$hideReplies} on:change={toggleReplies} />
-      <small class="text-gray-3">Show replies</small>
+      <small class="text-neutral-200">Show replies</small>
     </div>
-    <i class="fa fa-refresh cursor-pointer p-2" on:click={applyFilter} />
-    <i class="fa fa-sliders cursor-pointer p-2" on:click={open} />
+    <i class="fa fa-search cursor-pointer p-2" on:click={open} />
     <slot name="controls" />
   </div>
   <div class="mb-2 mr-2 inline-block py-1">Showing notes:</div>
@@ -252,6 +250,11 @@
       Found on {displayRelays(relays.map(urlToRelay), 2)}
     </Chip>
   {/if}
+  <div class="inline-block rounded-full border border-neutral-100" on:click={open}>
+    <div class="flex h-7 w-7 items-center justify-center">
+      <i class="fa fa-plus cursor-pointer" />
+    </div>
+  </div>
 </div>
 
 {#if isOpen}
@@ -277,9 +280,13 @@
         </div>
         <div class="flex flex-col gap-1">
           <strong>Kinds</strong>
-          <MultiSelect search={searchKinds} bind:value={_filter.kinds} getKey={prop("kind")}>
+          <SearchSelect
+            multiple
+            search={searchKinds}
+            bind:value={_filter.kinds}
+            getKey={prop("kind")}>
             <div slot="item" let:item>{item.label} (kind {item.kind})</div>
-          </MultiSelect>
+          </SearchSelect>
         </div>
         <div class="flex flex-col gap-1">
           <strong>Authors</strong>
@@ -293,20 +300,24 @@
         </div>
         <div class="flex flex-col gap-1">
           <strong>Topics</strong>
-          <MultiSelect search={$searchTopics} bind:value={_filter["#t"]}>
+          <SearchSelect
+            multiple
+            search={$searchTopics}
+            bind:value={_filter["#t"]}
+            termToItem={objOf("name")}>
             <div slot="item" let:item>
               <div class="-my-1">
                 #{item.name}
               </div>
             </div>
-          </MultiSelect>
+          </SearchSelect>
         </div>
         <div class="flex flex-col gap-1">
           <strong>Mentions</strong>
           <PersonMultiSelect bind:value={_filter["#p"]} />
         </div>
         <div class="flex justify-end">
-          <Anchor theme="button-accent" type="submit" on:click={applyFilter}>Apply Filters</Anchor>
+          <Anchor button accent type="submit" on:click={applyFilter}>Apply Filters</Anchor>
         </div>
       </Content>
     </form>

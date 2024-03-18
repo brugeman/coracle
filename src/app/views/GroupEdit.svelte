@@ -1,28 +1,46 @@
 <script lang="ts">
+  import {prop} from "ramda"
   import {toast} from "src/partials/state"
   import type {Values} from "src/app/shared/GroupDetailsForm.svelte"
   import GroupDetailsForm from "src/app/shared/GroupDetailsForm.svelte"
-  import {groups, publishGroupMeta, getGroupId, getGroupName} from "src/engine"
+  import {
+    deleteGroupMeta,
+    publishGroupMeta,
+    publishCommunityMeta,
+    getGroupId,
+    getGroupName,
+    deriveGroup,
+  } from "src/engine"
   import {router} from "src/app/router"
 
   export let address
 
-  const group = groups.key(address)
+  const group = deriveGroup(address)
 
   const initialValues = {
     id: getGroupId($group),
-    name: getGroupName($group),
-    image: $group.image || "",
-    description: $group.description || "",
-    isPublic: $group.access !== "closed",
+    type: address.startsWith("34550:") ? "open" : "closed",
     relays: $group.relays || [],
+    list_publicly: $group.listing_is_public,
+    meta: {
+      name: getGroupName($group),
+      about: $group.meta?.about || "",
+      picture: $group.meta?.picture || "",
+      banner: $group.meta?.banner || "",
+    },
   }
 
-  const onSubmit = async (values: Values) => {
-    const access = values.isPublic ? "hybrid" : "closed"
-    const pub = await publishGroupMeta(address, {...values, access})
+  const onSubmit = async ({id, type, list_publicly, relays, meta}: Values) => {
+    // If we're switching group listing visibility, delete the old listing
+    if ($group.listing_is_public && !list_publicly) {
+      await prop("result", await deleteGroupMeta($group.address))
+    }
 
-    await pub.result
+    if (type === "open") {
+      await publishCommunityMeta(address, id, relays, meta)
+    } else {
+      await publishGroupMeta(address, id, relays, meta, list_publicly)
+    }
 
     toast.show("info", "Your group has been updated!")
     router.pop()

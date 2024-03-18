@@ -1,26 +1,33 @@
 <script lang="ts">
-  import {pluck} from "ramda"
-  import Content from "src/partials/Content.svelte"
+  import {pluck, uniq} from "ramda"
+  import Field from "src/partials/Field.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Anchor from "src/partials/Anchor.svelte"
   import PersonMultiSelect from "src/app/shared/PersonMultiSelect.svelte"
   import {router} from "src/app/router"
+  import {pubkey, nip44} from "src/engine"
 
   let profiles = []
 
-  const pubkeys = pluck("pubkey", profiles)
-  const submit = () => router.at("channels").of(pubkeys).open()
+  const submit = () => router.at("channels").of(pubkeys).push()
+
+  $: pubkeys = uniq(pluck("pubkey", profiles).concat($pubkey))
+  $: hasError = pubkeys.length > 2 && !$nip44.isEnabled()
 </script>
 
 <form on:submit|preventDefault={submit} class="flex justify-center py-12">
-  <Content>
+  <FlexColumn class="pb-56">
     <h2 class="staatliches text-center text-6xl">Start a conversation</h2>
-    <div class="flex w-full flex-col gap-8 pb-56">
-      <div class="flex flex-col gap-1">
-        <strong>Group members</strong>
-        <PersonMultiSelect bind:value={profiles} />
-        <p class="text-sm text-gray-1">Who do you want to invite?</p>
-      </div>
-      <Anchor tag="button" theme="button" type="submit" class="text-center">Done</Anchor>
-    </div>
-  </Content>
+    <Field label="Who do you want to talk to?">
+      <PersonMultiSelect autofocus bind:value={profiles} />
+    </Field>
+    <Anchor disabled={hasError} button tag="button" type="submit">Done</Anchor>
+    {#if hasError}
+      <p class="flex gap-2">
+        <i class="fa fa-info-circle p-1" />
+        You are using a login method that doesn't yet support group chats. Please consider upgrading
+        your signer to access this feature.
+      </p>
+    {/if}
+  </FlexColumn>
 </form>

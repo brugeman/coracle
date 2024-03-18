@@ -1,25 +1,74 @@
 import {omit, assoc} from "ramda"
-import {generatePrivateKey, getPublicKey} from "nostr-tools"
-import {appDataKeys} from "src/util/nostr"
-import {createAndPublish} from "src/engine/network/utils"
+import {generatePrivateKey, getPublicKey, appDataKeys} from "src/util/nostr"
+import type {NostrConnectHandler} from "src/engine/network/model"
+import {createAndPublish, NostrConnectBroker} from "src/engine/network/utils"
+import {people} from "src/engine/people/state"
+import {fetchHandle} from "src/engine/people/utils"
 import type {Session} from "./model"
 import {sessions, pubkey} from "./state"
 import {canSign, nip04, session} from "./derived"
 
 const addSession = (s: Session) => {
   sessions.update(assoc(s.pubkey, s))
+  people.key(s.pubkey).update($p => ({...$p, pubkey: s.pubkey}))
   pubkey.set(s.pubkey)
 }
 
-export const loginWithPrivateKey = privkey =>
-  addSession({method: "privkey", pubkey: getPublicKey(privkey), privkey})
+export const loginWithPrivateKey = (privkey, extra = {}) =>
+  addSession({method: "privkey", pubkey: getPublicKey(privkey), privkey, ...extra})
 
 export const loginWithPublicKey = pubkey => addSession({method: "pubkey", pubkey})
 
 export const loginWithExtension = pubkey => addSession({method: "extension", pubkey})
 
-export const loginWithNsecBunker = (pubkey, bunkerToken) =>
-  addSession({method: "bunker", pubkey, bunkerKey: generatePrivateKey(), bunkerToken})
+export const loginWithNsecBunker = async (pubkey, connectToken, connectRelay) => {
+  const connectKey = generatePrivateKey()
+  const connectHandler = {relays: [connectRelay]}
+  const broker = NostrConnectBroker.get(pubkey, connectKey, connectHandler)
+  const result = await broker.connect(connectToken)
+
+  if (result) {
+    addSession({
+      method: "connect",
+      pubkey,
+      connectKey,
+      connectToken,
+      connectHandler,
+    })
+  }
+
+  return result
+}
+
+export const loginWithNostrConnect = async (username, connectHandler: NostrConnectHandler) => {
+  const connectKey = generatePrivateKey()
+  const {pubkey} = (await fetchHandle(`${username}@${connectHandler.domain}`)) || {}
+
+  let broker = NostrConnectBroker.get(pubkey, connectKey, connectHandler)
+
+  if (!pubkey) {
+    const pubkey = await broker.createAccount(username)
+
+    if (!pubkey) {
+      return null
+    }
+
+    broker = NostrConnectBroker.get(pubkey, connectKey, connectHandler)
+  }
+
+  const result = await broker.connect()
+
+  if (result) {
+    addSession({
+      method: "connect",
+      pubkey: broker.pubkey,
+      connectKey,
+      connectHandler,
+    })
+  }
+
+  return result
+}
 
 export const logoutPubkey = pubkey => {
   if (session.get().pubkey === pubkey) {
@@ -51,6 +100,12 @@ export const publishSettings = async (updates: Record<string, any>) => {
   })
 }
 
-export const updateSession = (k, f) => sessions.update($s => ({...$s, [k]: f($s[k])}))
+export const updateSession = (k, f) => sessions.update($s => ($s[k] ? {...$s, [k]: f($s[k])} : $s))
 
-export const updateCurrentSession = f => updateSession(pubkey.get(), f)
+export const updateCurrentSession = f => {
+  const $pubkey = pubkey.get()
+
+  if ($pubkey) {
+    updateSession($pubkey, f)
+  }
+}

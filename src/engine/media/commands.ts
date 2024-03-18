@@ -1,4 +1,4 @@
-import {prop, nth, uniq, flatten, groupBy} from "ramda"
+import {prop, identity, flatten, groupBy} from "ramda"
 import {Fetch, tryFunc, sleep} from "hurdak"
 import {now, cached, Tags} from "paravel"
 import {joinPath} from "src/util/misc"
@@ -33,7 +33,7 @@ export const uploadFileToHost = async (url, file) => {
     const {status, nip94_event} = await nip98Fetch(response.processing_url, "GET")
 
     if (status === "success") {
-      return Tags.from(nip94_event).type("url").values().first()
+      return nip94_event
     }
 
     if (now() - startTime > 60) {
@@ -53,7 +53,7 @@ export const uploadFileToHosts = (urls, file) =>
   Promise.all(urls.map(url => tryFunc(async () => await uploadFileToHost(url, file))))
 
 export const uploadFilesToHosts = async (urls, files) =>
-  flatten(await Promise.all(urls.map(url => uploadFilesToHost(url, files))))
+  flatten(await Promise.all(urls.map(url => uploadFilesToHost(url, files)))).filter(identity)
 
 export const compressFiles = (files, opts) =>
   Promise.all(
@@ -63,18 +63,15 @@ export const compressFiles = (files, opts) =>
       }
 
       return blobToFile(await stripExifData(f, opts))
-    })
+    }),
   )
 
 export const eventsToMeta = (events: Event[]) => {
-  const tagsByHash = groupBy(
-    tags => tags.type("ox").values().first(),
-    events.map(e => Tags.from(e))
-  )
+  const tagsByHash = groupBy((tags: Tags) => tags.get("ox").value(), events.map(Tags.fromEvent))
 
   // Merge all nip94 tags together so we can supply as much imeta as possible
   return Object.values(tagsByHash).map(groupedTags => {
-    return new Tags(uniq(groupedTags.flatMap(tags => tags.filter(nth(1)).all())))
+    return Tags.from(groupedTags.flatMap(tags => tags.valueOf())).uniq()
   })
 }
 

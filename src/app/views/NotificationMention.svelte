@@ -1,21 +1,21 @@
 <script lang="ts">
-  import {pluck} from "ramda"
+  import {pluck, uniq} from "ramda"
   import {Tags} from "paravel"
   import {formatTimestamp} from "src/util/misc"
   import Note from "src/app/shared/Note.svelte"
-  import NotificationPeople from "src/app/shared/NotificationPeople.svelte"
+  import PeopleAction from "src/app/shared/PeopleAction.svelte"
   import type {Notification} from "src/engine"
 
   export let notification: Notification
 
   const {timestamp, interactions} = notification
-  const parentId = Tags.from(interactions[0]).getReply()
-  const note = parentId ? {id: parentId} : interactions[0]
+  const parent = Tags.fromEvent(interactions[0]).whereKey("e").parent()
+  const note = parent ? {id: parent.value()} : interactions[0]
 </script>
 
-<div class="flex flex-col gap-4">
-  <div class="flex justify-between">
-    <NotificationPeople {notification} actionText="mentioned you" />
+<div>
+  <div class="mb-4 flex justify-between">
+    <PeopleAction pubkeys={uniq(pluck("pubkey", interactions))} actionText="mentioned you" />
     <small>{formatTimestamp(timestamp)}</small>
   </div>
   <Note

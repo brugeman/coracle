@@ -1,49 +1,62 @@
 <script lang="ts">
   import {onMount} from "svelte"
-  import {reject} from "ramda"
   import {Storage} from "hurdak"
   import {FeedLoader} from "src/engine"
   import {createScroller} from "src/util/misc"
+  import {LOCAL_RELAY_URL} from "src/util/nostr"
   import {fly} from "src/util/transition"
   import {getModal} from "src/partials/state"
   import Spinner from "src/partials/Spinner.svelte"
-  import Content from "src/partials/Content.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import FeedControls from "src/app/shared/FeedControls.svelte"
   import Note from "src/app/shared/Note.svelte"
-  import type {Event, DynamicFilter} from "src/engine"
+  import type {DynamicFilter} from "src/engine"
   import {
+    hints,
     readable,
     writable,
     compileFilters,
+    forcePlatformRelays,
     searchableRelays,
     getRelaysFromFilters,
   } from "src/engine"
 
   export let relays = []
   export let filter: DynamicFilter = {}
+  export let anchor = null
+  export let skipCache = false
+  export let skipPlatform = false
+  export let shouldDisplay = null
   export let shouldListen = false
   export let hideControls = false
+  export let hideSpinner = false
   export let showGroup = false
-  export let noCache = false
   export let onEvent = null
 
   let feed
   let notes = readable([])
-  let hideReplies = writable(Storage.getJson("hideReplies"))
+
+  const hideReplies = writable(Storage.getJson("hideReplies"))
 
   const getRelays = () => {
-    let selection = relays
+    if (relays.length > 0) {
+      return relays
+    }
 
     // If we have a search term we need to use only relays that support search
-    if (selection.length === 0 && filter.search) {
-      selection = $searchableRelays
+    let result = filter.search ? $searchableRelays : getRelaysFromFilters(compileFilters([filter]))
+
+    result = hints.scenario([result]).getUrls()
+
+    if (!skipPlatform) {
+      result = forcePlatformRelays(result)
     }
 
-    if (selection.length === 0) {
-      selection = getRelaysFromFilters(compileFilters([filter]))
+    if (!skipCache) {
+      result.push(LOCAL_RELAY_URL)
     }
 
-    return selection
+    return result
   }
 
   const loadMore = () => feed.load(5)
@@ -54,8 +67,8 @@
     feed = new FeedLoader({
       filters: compileFilters([filter], {includeReposts: true}),
       relays: getRelays(),
+      anchor,
       shouldListen,
-      shouldDefer: true,
       shouldLoadParents: true,
       shouldHideReplies: $hideReplies,
       onEvent,
@@ -63,8 +76,8 @@
 
     notes = feed.notes
 
-    if (noCache) {
-      notes = notes.derived(reject((e: Event) => e.seen_on.length === 0))
+    if (shouldDisplay) {
+      notes = notes.derived(xs => xs.filter(shouldDisplay))
     }
   }
 
@@ -80,8 +93,6 @@
   })
 
   onMount(() => {
-    start()
-
     const scroller = createScroller(loadMore, {element: getModal()})
 
     return () => {
@@ -91,23 +102,26 @@
   })
 </script>
 
-<Content size="inherit" gap="gap-6">
-  {#if !hideControls}
-    <FeedControls {hideReplies} {filter} {relays} {updateFilter}>
-      <slot name="controls" slot="controls" />
-    </FeedControls>
-  {/if}
-  <div class="flex flex-col gap-4">
-    {#each $notes as note, i (note.id)}
-      <div in:fly={{y: 20}}>
-        <Note
-          depth={$hideReplies ? 0 : 2}
-          context={note.replies || []}
-          filters={compileFilters([filter])}
-          {showGroup}
-          {note} />
-      </div>
-    {/each}
-  </div>
+{#if !hideControls}
+  <FeedControls {hideReplies} {filter} {relays} {updateFilter}>
+    <slot name="controls" slot="controls" />
+  </FeedControls>
+{/if}
+
+<FlexColumn xl>
+  {#each $notes as note, i (note.id)}
+    <div in:fly={{y: 20}}>
+      <Note
+        depth={$hideReplies ? 0 : 2}
+        context={note.replies || []}
+        filters={compileFilters([filter])}
+        {showGroup}
+        {anchor}
+        {note} />
+    </div>
+  {/each}
+</FlexColumn>
+
+{#if !hideSpinner}
   <Spinner />
-</Content>
+{/if}

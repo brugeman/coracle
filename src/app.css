@@ -12,36 +12,57 @@
 }
 
 @font-face {
+  font-family: "Satoshis";
+  font-style: normal;
+  font-weight: 400;
+  src:
+    local(""),
+    url("/fonts/Satoshi Symbol.ttf") format("truetype");
+}
+
+@font-face {
   font-family: "Lato";
   font-style: normal;
   font-weight: 400;
-  src: local(""), url("/fonts/Lato-Regular.ttf") format("truetype");
+  src:
+    local(""),
+    url("/fonts/Lato-Regular.ttf") format("truetype");
 }
 
 @font-face {
   font-family: "Lato";
   font-style: bold;
   font-weight: 600;
-  src: local(""), url("/fonts/Lato-Bold.ttf") format("truetype");
+  src:
+    local(""),
+    url("/fonts/Lato-Bold.ttf") format("truetype");
 }
 
 @font-face {
   font-family: "Lato";
   font-style: italic;
   font-weight: 400;
-  src: local(""), url("/fonts/Italic.ttf") format("truetype");
+  src:
+    local(""),
+    url("/fonts/Italic.ttf") format("truetype");
 }
 
 @font-face {
   font-family: "Staatliches";
   font-style: normal;
   font-weight: 400;
-  src: local(""), url("/fonts/Staatliches Regular 400.ttf") format("truetype");
+  src:
+    local(""),
+    url("/fonts/Staatliches Regular 400.ttf") format("truetype");
 }
 
 .montserrat {
   font-family: Lato;
   font-weight: 400;
+}
+
+body {
+  --bc-color-brand: var(--accent);
 }
 
 .staatliches {
@@ -156,16 +177,18 @@ body,
 }
 
 .long-form-content code {
-  background-color: var(--gray-8);
+  background-color: var(--neutral-800);
   line-height: 1.5em;
   box-decoration-break: clone;
   padding: 1px 0.2em;
 }
 
 .long-form-content blockquote {
-  border-left: 0.25rem solid var(--gray-5);
+  border-left: 0.25rem solid var(--neutral-600);
   padding: 1rem 0 1rem 1rem;
 }
+
+/* Datetime field */
 
 .date-time-field {
   margin: -0.5rem !important;
@@ -173,6 +196,7 @@ body,
 }
 
 .date-time-field input {
+  width: 100% !important;
   border: none !important;
   padding: 0.5rem !important;
   --date-picker-background: transparent;
@@ -180,9 +204,18 @@ body,
   --date-picker-highlight-shadow: transparent;
 }
 
+/* Code blocks */
+
 .code {
-  background-color: var(--gray-8);
+  background-color: var(--neutral-800);
   line-height: 1.5em;
   box-decoration-break: clone;
   padding: 1px 0.2em;
+}
+
+/* Event Calendar */
+
+.ec-day,
+.ec-button {
+  cursor: pointer;
 }

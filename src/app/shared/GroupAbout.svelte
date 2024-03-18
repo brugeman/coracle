@@ -1,6 +1,7 @@
 <script lang="ts">
   import {ellipsize} from "hurdak"
   import {parseContent} from "src/util/notes"
+  import {displayUrl} from "src/util/misc"
   import Anchor from "src/partials/Anchor.svelte"
   import {groups, displayGroup} from "src/engine"
 
@@ -9,7 +10,7 @@
 
   const group = groups.key(address)
 
-  $: about = $group?.description || ""
+  $: about = $group?.meta?.about || ""
   $: content = parseContent({content: truncate ? ellipsize(about, 140) : about})
 </script>
 
@@ -21,7 +22,7 @@
       {/each}
     {:else if type === "link"}
       <Anchor class="underline" external href={value.url}>
-        {value.url.replace(/https?:\/\/(www\.)?/, "")}
+        {displayUrl(value.url)}
       </Anchor>
     {:else if type.startsWith("nostr:")}
       <Anchor class="underline" external href={"/" + value.entity}>

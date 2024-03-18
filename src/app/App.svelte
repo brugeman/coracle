@@ -2,87 +2,33 @@
   import "@fortawesome/fontawesome-free/css/fontawesome.css"
   import "@fortawesome/fontawesome-free/css/solid.css"
 
-  import {nip19, getPublicKey, generatePrivateKey} from "nostr-tools"
+  import {nip19} from "nostr-tools"
   import {pluck} from "ramda"
   import {seconds, Fetch} from "hurdak"
-  import {now} from "paravel"
-  import {tryFetch, hexToBech32, bech32ToHex} from "src/util/misc"
+  import {now, normalizeRelayUrl} from "paravel"
+  import logger from "src/util/logger"
+  import * as misc from "src/util/misc"
+  import * as nostr from "src/util/nostr"
   import {storage, session, stateKey, relays, getSetting, dufflepud} from "src/engine"
   import * as engine from "src/engine"
-  import {loadAppData} from "src/app/state"
-  import {theme, getThemeVariables, appName} from "src/partials/state"
-  import SideNav from "src/app/SideNav.svelte"
+  import {loadAppData, loadUserData} from "src/app/state"
+  import {themeVariables, appName} from "src/partials/state"
+  import Menu from "src/app/Menu.svelte"
   import Routes from "src/app/Routes.svelte"
   import Toast from "src/app/Toast.svelte"
-  import TopNav from "src/app/TopNav.svelte"
+  import Nav from "src/app/Nav.svelte"
   import ForegroundButtons from "src/app/ForegroundButtons.svelte"
   import {isNil} from "ramda"
   import {onMount} from "svelte"
   import {memoize} from "src/util/misc"
-  import About from "src/app/views/About.svelte"
-  import Apps from "src/app/views/Apps.svelte"
-  import Bech32Entity from "src/app/views/Bech32Entity.svelte"
-  import ChannelCreate from "src/app/views/ChannelCreate.svelte"
-  import ChannelsDetail from "src/app/views/ChannelsDetail.svelte"
-  import ChannelsList from "src/app/views/ChannelsList.svelte"
-  import DataExport from "src/app/views/DataExport.svelte"
-  import DataImport from "src/app/views/DataImport.svelte"
-  import Explore from "src/app/views/Explore.svelte"
-  import GroupList from "src/app/views/GroupList.svelte"
-  import GroupDetail from "src/app/views/GroupDetail.svelte"
-  import GroupCreate from "src/app/views/GroupCreate.svelte"
-  import GroupEdit from "src/app/views/GroupEdit.svelte"
-  import GroupInfo from "src/app/views/GroupInfo.svelte"
-  import GroupRotate from "src/app/views/GroupRotate.svelte"
-  import Help from "src/app/views/Help.svelte"
-  import Feeds from "src/app/views/Feeds.svelte"
-  import LabelCreate from "src/app/views/LabelCreate.svelte"
-  import LabelDetail from "src/app/views/LabelDetail.svelte"
-  import ListEdit from "src/app/views/ListEdit.svelte"
-  import ListList from "src/app/views/ListList.svelte"
-  import ListSelect from "src/app/views/ListSelect.svelte"
-  import Login from "src/app/views/Login.svelte"
-  import LoginAdvanced from "src/app/views/LoginAdvanced.svelte"
-  import LoginBunker from "src/app/views/LoginBunker.svelte"
-  import LoginConnect from "src/app/views/LoginConnect.svelte"
-  import LoginPrivKey from "src/app/views/LoginPrivKey.svelte"
-  import LoginPubKey from "src/app/views/LoginPubKey.svelte"
-  import Logout from "src/app/views/Logout.svelte"
-  import MessagesDetail from "src/app/views/MessagesDetail.svelte"
-  import MessagesList from "src/app/views/MessagesList.svelte"
-  import ModalMessage from "src/app/views/ModalMessage.svelte"
-  import NoteCreate from "src/app/views/NoteCreate.svelte"
-  import NoteDetail from "src/app/views/NoteDetail.svelte"
-  import Notifications from "src/app/views/Notifications.svelte"
-  import Onboarding from "src/app/views/Onboarding.svelte"
-  import PersonDetail from "src/app/views/PersonDetail.svelte"
-  import PersonInfo from "src/app/views/PersonInfo.svelte"
-  import PersonFollows from "src/app/shared/PersonFollows.svelte"
-  import PersonFollowers from "src/app/shared/PersonFollowers.svelte"
-  import PersonList from "src/app/shared/PersonList.svelte"
-  import PersonZap from "src/app/views/PersonZap.svelte"
-  import PublishInfo from "src/app/views/PublishInfo.svelte"
-  import QRCode from "src/app/views/QRCode.svelte"
-  import MediaDetail from "src/app/views/MediaDetail.svelte"
-  import RelayBrowse from "src/app/views/RelayBrowse.svelte"
-  import RelayDetail from "src/app/views/RelayDetail.svelte"
-  import RelayList from "src/app/views/RelayList.svelte"
-  import RelayReview from "src/app/views/RelayReview.svelte"
-  // import ReportCreate from "src/app/views/ReportCreate.svelte"
-  import ThreadDetail from "src/app/views/ThreadDetail.svelte"
-  import TopicFeed from "src/app/views/TopicFeed.svelte"
-  import UserContent from "src/app/views/UserContent.svelte"
-  import UserData from "src/app/views/UserData.svelte"
-  import UserKeys from "src/app/views/UserKeys.svelte"
-  import UserProfile from "src/app/views/UserProfile.svelte"
-  import UserSettings from "src/app/views/UserSettings.svelte"
   import {logUsage} from "src/app/state"
   import {
     router,
     asChannelId,
     asPerson,
-    asGroup,
+    asNaddr,
     asCsv,
+    asJson,
     asString,
     asUrlComponent,
     asFilter,
@@ -93,224 +39,281 @@
 
   // Routes
 
-  router.register("/about", About)
-  router.register("/apps", Apps)
-  router.register("/bech32", Bech32Entity)
+  router.register("/about", import("src/app/views/About.svelte"))
+  router.register("/search", import("src/app/views/Search.svelte"))
+  router.register("/events", import("src/app/views/Calendar.svelte"))
 
-  router.register("/channels", ChannelsList)
-  router.register("/channels/create", ChannelCreate)
-  router.register("/channels/requests", ChannelsList)
-  router.register("/channels/:channelId", ChannelsDetail, {
+  router.register("/channels", import("src/app/views/ChannelsList.svelte"), {
+    requireSigner: true,
+  })
+  router.register("/channels/create", import("src/app/views/ChannelCreate.svelte"), {
+    requireSigner: true,
+  })
+  router.register("/channels/requests", import("src/app/views/ChannelsList.svelte"), {
+    requireSigner: true,
+  })
+  router.register("/channels/:channelId", import("src/app/views/ChannelsDetail.svelte"), {
+    requireSigner: true,
     serializers: {
       channelId: asChannelId,
     },
   })
 
-  router.register("/conversations", MessagesList, {
-    requireUser: true,
-  })
-  router.register("/conversations/requests", MessagesList, {
-    requireUser: true,
-  })
-  router.register("/conversations/:entity", MessagesDetail, {
-    requireUser: true,
+  router.register("/events/:address", import("src/app/views/EventDetail.svelte"), {
     serializers: {
-      entity: asPerson,
+      address: asNaddr("address"),
+    },
+  })
+  router.register("/events/:address/edit", import("src/app/views/EventEdit.svelte"), {
+    serializers: {
+      address: asNaddr("address"),
+    },
+  })
+  router.register("/events/:address/delete", import("src/app/views/EventDelete.svelte"), {
+    serializers: {
+      address: asNaddr("address"),
     },
   })
 
-  router.register("/explore", Explore)
-
-  router.register("/groups", GroupList)
-  router.register("/groups/new", GroupCreate)
-  router.register("/groups/:address/edit", GroupEdit, {
+  router.register("/groups", import("src/app/views/GroupList.svelte"))
+  router.register("/groups/new", import("src/app/views/GroupCreate.svelte"), {
+    requireSigner: true,
+  })
+  router.register("/groups/:address/edit", import("src/app/views/GroupEdit.svelte"), {
+    requireSigner: true,
     serializers: {
-      address: asGroup("address"),
+      address: asNaddr("address"),
     },
   })
-  router.register("/groups/:address/info", GroupInfo, {
+  router.register("/groups/:address/info", import("src/app/views/GroupInfo.svelte"), {
     serializers: {
-      address: asGroup("address"),
+      address: asNaddr("address"),
     },
   })
-  router.register("/groups/:address/rotate", GroupRotate, {
+  router.register("/groups/:address/share", import("src/app/views/GroupShare.svelte"), {
     serializers: {
-      address: asGroup("address"),
+      address: asNaddr("address"),
+    },
+  })
+  router.register("/groups/:address/rotate", import("src/app/views/GroupRotate.svelte"), {
+    requireSigner: true,
+    serializers: {
+      address: asNaddr("address"),
       addMembers: asCsv("addMembers"),
       removeMembers: asCsv("removeMembers"),
     },
   })
-  router.register("/groups/:address/:activeTab", GroupDetail, {
+  router.register("/groups/:address/:activeTab", import("src/app/views/GroupDetail.svelte"), {
     serializers: {
-      address: asGroup("address"),
+      address: asNaddr("address"),
+      claim: asString('claim'),
+    },
+  })
+  router.register("/groups/:address", import("src/app/views/GroupDetail.svelte"), {
+    serializers: {
+      address: asNaddr("address"),
+      claim: asString('claim'),
     },
   })
 
-  router.register("/help/:topic", Help)
+  router.register("/help/:topic", import("src/app/views/Help.svelte"))
 
-  router.register("/labels/:label", LabelDetail, {
+  router.register("/invite", import("src/app/views/InviteAccept.svelte"), {
     serializers: {
-      label: asUrlComponent("label"),
+      people: asCsv("people"),
       relays: asCsv("relays"),
+      groups: asCsv("groups"),
+    },
+  })
+  router.register("/invite/create", import("src/app/views/InviteCreate.svelte"), {
+    serializers: {
+      initialPubkey: asUrlComponent("initialPubkey"),
+      initialGroupAddress: asUrlComponent("initialGroupAddress"),
     },
   })
 
-  router.register("/lists", ListList)
-  router.register("/lists/create", ListEdit)
-  router.register("/lists/select", ListSelect, {
+  router.register("/lists", import("src/app/views/ListList.svelte"))
+  router.register("/lists/create", import("src/app/views/ListEdit.svelte"))
+  router.register("/lists/select", import("src/app/views/ListSelect.svelte"), {
     serializers: {
       type: asString("type"),
       value: asString("value"),
     },
   })
-  router.register("/lists/:naddr", ListEdit)
+  router.register("/lists/:address", import("src/app/views/ListEdit.svelte"), {
+    serializers: {
+      address: asNaddr("address"),
+    },
+  })
 
-  router.register("/login/advanced", LoginAdvanced)
-  router.register("/login/bunker", LoginBunker)
-  router.register("/login/connect", LoginConnect)
-  router.register("/login/intro", Login)
-  router.register("/login/privkey", LoginPrivKey)
-  router.register("/login/pubkey", LoginPubKey)
-  router.register("/logout", Logout)
+  router.register("/login", import("src/app/views/Login.svelte"))
+  router.register("/login/bunker", import("src/app/views/LoginBunker.svelte"))
+  router.register("/login/privkey", import("src/app/views/LoginPrivKey.svelte"))
+  router.register("/login/pubkey", import("src/app/views/LoginPubKey.svelte"))
+  router.register("/login/connect", import("src/app/views/LoginConnect.svelte"), {
+    requireUser: true,
+  })
+  router.register("/logout", import("src/app/views/Logout.svelte"))
 
-  router.register("/media/:url", MediaDetail, {
+  router.register("/listings", import("src/app/views/Market.svelte"))
+  router.register("/listings/:address/edit", import("src/app/views/ListingEdit.svelte"), {
+    requireSigner: true,
+    serializers: {
+      address: asNaddr("address"),
+    },
+  })
+  router.register("/listings/:address/delete", import("src/app/views/ListingDelete.svelte"), {
+    requireSigner: true,
+    serializers: {
+      address: asNaddr("address"),
+    },
+  })
+
+  router.register("/media/:url", import("src/app/views/MediaDetail.svelte"), {
     serializers: {
       url: asUrlComponent("url"),
     },
   })
 
-  router.register("/message", ModalMessage)
-
-  router.register("/", Feeds, {
+  router.register("/", import("src/app/views/Home.svelte"), {
     serializers: {
       filter: asFilter,
     },
   })
-  router.register("/notes", Feeds, {
+  router.register("/notes", import("src/app/views/Home.svelte"), {
     serializers: {
       filter: asFilter,
     },
   })
-  router.register("/notes/create", NoteCreate, {
-    requireUser: true,
+  router.register("/notes/create", import("src/app/views/NoteCreate.svelte"), {
+    requireSigner: true,
     serializers: {
       pubkey: asPerson,
-      group: asGroup("group"),
+      group: asNaddr("group"),
+      type: asString("type"),
     },
   })
-  router.register("/notes/:entity", NoteDetail, {
+  router.register("/notes/:entity", import("src/app/views/NoteDetail.svelte"), {
     serializers: {
       entity: asNote,
     },
   })
-  router.register("/notes/:entity/label", LabelCreate, {
+  router.register("/notes/:entity/label", import("src/app/views/LabelCreate.svelte"), {
     serializers: {
       entity: asNote,
     },
   })
-  router.register("/notes/:entity/status", PublishInfo, {
+  router.register("/notes/:entity/status", import("src/app/views/PublishInfo.svelte"), {
     serializers: {
       entity: asNote,
     },
   })
-  router.register("/notes/:entity/thread", ThreadDetail, {
+  router.register("/notes/:entity/thread", import("src/app/views/ThreadDetail.svelte"), {
     serializers: {
       entity: asNote,
     },
   })
 
-  router.register("/notifications", Notifications, {
+  router.register("/notifications", import("src/app/views/Notifications.svelte"), {
     requireUser: true,
   })
-  router.register("/notifications/:activeTab", Notifications, {
+  router.register("/notifications/:activeTab", import("src/app/views/Notifications.svelte"), {
     requireUser: true,
   })
 
-  router.register("/onboarding", Onboarding)
+  router.register("/signup", import("src/app/views/Onboarding.svelte"))
 
-  router.register("/people/list", PersonList, {
+  router.register("/people/list", import("src/app/shared/PersonList.svelte"), {
     serializers: {
       pubkeys: asCsv("pubkeys"),
     },
   })
-  router.register("/people/:entity", PersonDetail, {
+  router.register("/people/:entity", import("src/app/views/PersonDetail.svelte"), {
+    required: ["pubkey"],
     serializers: {
       entity: asPerson,
       filter: asFilter,
     },
   })
-  router.register("/people/:entity/followers", PersonFollowers, {
+  router.register("/people/:entity/followers", import("src/app/views/PersonFollowers.svelte"), {
+    required: ["pubkey"],
     serializers: {
       entity: asPerson,
     },
   })
-  router.register("/people/:entity/follows", PersonFollows, {
+  router.register("/people/:entity/follows", import("src/app/views/PersonFollows.svelte"), {
+    required: ["pubkey"],
     serializers: {
       entity: asPerson,
     },
   })
-  router.register("/people/:entity/info", PersonInfo, {
+  router.register("/people/:entity/info", import("src/app/views/PersonInfo.svelte"), {
+    required: ["pubkey"],
     serializers: {
       entity: asPerson,
     },
   })
-  router.register("/people/:entity/zap", PersonZap, {
+
+  router.register("/qrcode/:code", import("src/app/views/QRCode.svelte"), {
+    serializers: {
+      code: asUrlComponent("code"),
+    },
+  })
+
+  router.register("/relays/browse", import("src/app/views/RelayBrowse.svelte"))
+  router.register("/relays/:entity", import("src/app/views/RelayDetail.svelte"), {
+    serializers: {
+      entity: asRelay,
+      filter: asFilter,
+    },
+  })
+  router.register("/relays/:entity/review", import("src/app/views/RelayReview.svelte"), {
+    serializers: {
+      entity: asRelay,
+    },
+  })
+
+  router.register("/settings", import("src/app/views/UserSettings.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/content", import("src/app/views/UserContent.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/data", import("src/app/views/UserData.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/data/export", import("src/app/views/DataExport.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/data/import", import("src/app/views/DataImport.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/keys", import("src/app/views/UserKeys.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/profile", import("src/app/views/UserProfile.svelte"), {
+    requireUser: true,
+  })
+  router.register("/settings/relays", import("src/app/views/RelayList.svelte"))
+
+  router.register("/topics/:topic", import("src/app/views/TopicFeed.svelte"))
+
+  router.register("/zap", import("src/app/views/Zap.svelte"), {
+    required: ["splits"],
     serializers: {
       eid: asNote,
-      entity: asPerson,
-      lnurl: asString("lnurl"),
+      splits: asJson("splits"),
+      anonymous: asJson("anonymous"),
     },
   })
 
-  router.register("/qrcode/:code", QRCode)
-
-  router.register("/relays/browse", RelayBrowse)
-  router.register("/relays/:entity", RelayDetail, {
-    serializers: {
-      entity: asRelay,
-      filter: asFilter,
-    },
-  })
-  router.register("/relays/:entity/review", RelayReview, {
-    serializers: {
-      entity: asRelay,
-    },
-  })
-
-  router.register("/settings", UserSettings, {
-    requireUser: true,
-  })
-  router.register("/settings/content", UserContent, {
-    requireUser: true,
-  })
-  router.register("/settings/data", UserData, {
-    requireUser: true,
-  })
-  router.register("/settings/data/export", DataExport, {
-    requireUser: true,
-  })
-  router.register("/settings/data/import", DataImport, {
-    requireUser: true,
-  })
-  router.register("/settings/keys", UserKeys, {
-    requireUser: true,
-  })
-  router.register("/settings/profile", UserProfile, {
-    requireUser: true,
-  })
-  router.register("/settings/relays", RelayList, {
-    requireUser: true,
-  })
-
-  router.register("/topics/:topic", TopicFeed)
-
-  router.register("/:entity", Bech32Entity, {
+  router.register("/:entity", import("src/app/views/Bech32Entity.svelte"), {
     serializers: {
       entity: asEntity,
       filter: asFilter,
     },
   })
-  router.register("/:entity/*", Bech32Entity, {
+  router.register("/:entity/*", import("src/app/views/Bech32Entity.svelte"), {
     serializers: {
       entity: asEntity,
       filter: asFilter,
@@ -323,11 +326,10 @@
   ;(window as any).g = {
     ...engine,
     nip19,
-    bech32ToHex,
-    hexToBech32,
+    logger,
     router,
-    getPublicKey,
-    generatePrivateKey,
+    nostr,
+    misc,
   }
 
   // Theme
@@ -336,13 +338,13 @@
 
   document.head.append(style)
 
-  $: style.textContent = `:root { ${getThemeVariables($theme)}; background: var(--gray-8); }`
+  $: style.textContent = `:root { ${$themeVariables}; background: var(--neutral-800); }`
 
   // Scroll position
 
   let scrollY
 
-  router.history.subscribe($history => {
+  const unsubHistory = router.history.subscribe($history => {
     if ($history[0].config.modal) {
       // This is not idempotent, so don't duplicate it
       if (document.body.style.position !== "fixed") {
@@ -351,16 +353,13 @@
         document.body.style.top = `-${scrollY}px`
         document.body.style.position = `fixed`
       }
-    } else if (!isNil(scrollY)) {
-      const offset = scrollY
+    } else if (document.body.style.position === "fixed") {
+      document.body.setAttribute("style", "")
 
-      // I don't know why this timeout is necessary
-      setTimeout(() => {
-        document.body.setAttribute("style", "")
-        window.scrollTo(0, offset)
-      }, 100)
-
-      scrollY = null
+      if (!isNil(scrollY)) {
+        window.scrollTo(0, scrollY)
+        scrollY = null
+      }
     }
   })
 
@@ -370,16 +369,16 @@
     const unsubPage = router.page.subscribe(
       memoize($page => {
         if ($page) {
-          logUsage(btoa($page.path))
+          logUsage($page.path)
         }
 
         window.scrollTo(0, 0)
-      })
+      }),
     )
 
     const unsubModal = router.modal.subscribe($modal => {
       if ($modal) {
-        logUsage(btoa($modal.path))
+        logUsage($modal.path)
       }
     })
 
@@ -389,6 +388,7 @@
       unsubPage()
       unsubModal()
       unsubRouter()
+      unsubHistory()
     }
   })
 
@@ -398,7 +398,7 @@
     const handler = navigator.registerProtocolHandler as (
       scheme: string,
       handler: string,
-      name: string
+      name: string,
     ) => void
 
     handler?.("web+nostr", `${location.origin}/%s`, appName)
@@ -410,8 +410,10 @@
   // App data boostrap and relay meta fetching
 
   storage.ready.then(() => {
+    loadAppData()
+
     if ($session) {
-      loadAppData()
+      loadUserData()
     }
 
     const interval = setInterval(async () => {
@@ -426,7 +428,7 @@
         .filter(r => (r.info?.last_checked || 0) < now() - seconds(7, "day"))
         .slice(0, 20)
 
-      tryFetch(async () => {
+      misc.tryFetch(async () => {
         const result = await Fetch.fetchJson(dufflepud("relay/info"), {
           method: "POST",
           body: JSON.stringify({urls: pluck("url", staleRelays)}),
@@ -435,7 +437,9 @@
           },
         })
 
-        for (const {url, info} of result.data) {
+        for (const {url: rawUrl, info} of result.data) {
+          const url = normalizeRelayUrl(rawUrl)
+
           relays.key(url).merge({...info, url, last_checked: now()})
         }
       })
@@ -450,12 +454,12 @@
 {#await storage.ready}
   <!-- pass -->
 {:then}
-  <div>
+  <div class="text-tinted-200">
     <Routes />
     {#key $stateKey}
       <ForegroundButtons />
-      <SideNav />
-      <TopNav />
+      <Nav />
+      <Menu />
       <Toast />
     {/key}
   </div>

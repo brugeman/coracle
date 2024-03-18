@@ -1,21 +1,41 @@
 import {debounce} from "throttle-debounce"
+import {always} from "ramda"
+import {noop, sleep} from "hurdak"
+import {writable} from "src/engine/core/utils"
 import {load} from "src/engine/network/utils"
-import {getUserRelayUrls} from "src/engine/relays/utils"
 import {searchableRelays} from "src/engine/relays/derived"
-import {people} from "./state"
+import type {Event} from "src/engine/events/model"
 
-export const loadPeople = debounce(500, search => {
-  // If we have a query, search using nostr.band. If not, ask for random profiles.
-  // This allows us to populate results even if search isn't supported by forced urls
-  if (search.length > 2) {
-    load({
-      relays: searchableRelays.get(),
-      filters: [{kinds: [0], search, limit: 10}],
-    })
-  } else if (people.get().length < 50) {
-    load({
-      relays: getUserRelayUrls("read"),
-      filters: [{kinds: [0], limit: 50}],
-    })
+type PeopleLoaderOpts = {
+  shouldLoad?: (term: string) => boolean
+  onEvent?: (e: Event) => void
+}
+
+export const createPeopleLoader = ({
+  shouldLoad = always(true),
+  onEvent = noop,
+}: PeopleLoaderOpts = {}) => {
+  const loading = writable(false)
+
+  return {
+    loading,
+    load: debounce(500, term => {
+      if (term.length > 2 && shouldLoad(term)) {
+        const now = Date.now()
+
+        loading.set(true)
+
+        load({
+          onEvent,
+          relays: searchableRelays.get(),
+          filters: [{kinds: [0], search: term, limit: 100}],
+          onClose: async () => {
+            await sleep(Math.min(1000, Date.now() - now))
+
+            loading.set(false)
+          },
+        })
+      }
+    }),
   }
-})
+}

@@ -1,30 +1,36 @@
 <script lang="ts">
   import {nip19} from "nostr-tools"
-  import {debounce, throttle} from "throttle-debounce"
+  import {throttle} from "throttle-debounce"
   import {createEventDispatcher} from "svelte"
   import {last, partition, whereEq} from "ramda"
   import PersonBadge from "src/app/shared/PersonBadge.svelte"
   import ContentEditable from "src/partials/ContentEditable.svelte"
   import Suggestions from "src/partials/Suggestions.svelte"
   import {
-    load,
+    hints,
     follows,
     derivePerson,
     displayPerson,
-    searchableRelays,
-    getPubkeyHints,
     searchPeople,
+    createPeopleLoader,
   } from "src/engine"
 
   export let onSubmit
+  export let autofocus = false
+  export let placeholder = null
 
   let contenteditable, suggestions
 
   const dispatch = createEventDispatcher()
 
+  const {loading: loadingPeople, load: loadPeople} = createPeopleLoader({
+    shouldLoad: (term: string) => term.startsWith("@"),
+    onEvent: () => applySearch(getInfo().word),
+  })
+
   const pubkeyEncoder = {
     encode: pubkey => {
-      const relays = getPubkeyHints.limit(3).getHints(pubkey, "write")
+      const relays = hints.FromPubkeys([pubkey]).limit(3).getUrls()
       const nprofile = nip19.nprofileEncode({pubkey, relays})
 
       return "nostr:" + nprofile
@@ -35,22 +41,12 @@
     },
   }
 
-  const loadPeople = debounce(500, search => {
-    if (search.length > 2 && search.startsWith("@")) {
-      load({
-        relays: $searchableRelays,
-        filters: [{kinds: [0], search, limit: 10}],
-        onEvent: () => applySearch(getInfo().word),
-      })
-    }
-  })
-
   const applySearch = throttle(300, word => {
     let results = []
     if (word.length > 1 && word.startsWith("@")) {
       const [followed, notFollowed] = partition(
         p => $follows.has(p.pubkey),
-        $searchPeople(word.slice(1))
+        $searchPeople(word.slice(1)),
       )
 
       results = followed.concat(notFollowed)
@@ -198,6 +194,8 @@
     const input = contenteditable.getInput()
 
     input.innerHTML = ""
+
+    contenteditable.onInput()
   }
 
   export const nevent = text => {
@@ -210,6 +208,8 @@
     selection.collapse(input, 1)
     selection.getRangeAt(0).insertNode(textNode)
     selection.collapse(input, 0)
+
+    contenteditable.onInput()
   }
 
   export const write = text => {
@@ -227,6 +227,7 @@
     selection.collapse(textNode, text.length)
 
     autocomplete()
+    contenteditable.onInput()
   }
 
   export const newlines = n => {
@@ -235,6 +236,8 @@
 
     selection.getRangeAt(0).insertNode(newLines)
     selection.collapse(newLines, 2)
+
+    contenteditable.onInput()
   }
 
   export const parse = () => {
@@ -252,8 +255,10 @@
   }
 </script>
 
-<div class="flex">
+<div class="flex w-full">
   <ContentEditable
+    {autofocus}
+    {placeholder}
     style={$$props.style}
     class={$$props.class}
     bind:this={contenteditable}
@@ -262,7 +267,10 @@
   <slot name="addon" />
 </div>
 
-<Suggestions bind:this={suggestions} select={person => autocomplete({person})}>
+<Suggestions
+  bind:this={suggestions}
+  select={person => autocomplete({person})}
+  loading={$loadingPeople}>
   <div slot="item" let:item>
     <PersonBadge inert pubkey={item.pubkey} />
   </div>

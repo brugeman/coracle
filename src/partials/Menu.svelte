@@ -1,10 +1,8 @@
 <script lang="ts">
-  import cx from 'classnames'
+  import cx from "classnames"
   import Card from "src/partials/Card.svelte"
 </script>
 
-<Card class={cx($$props.class, "overflow-hidden shadow-lg")}>
-  <div class="-mx-3 -mt-1">
-    <slot />
-  </div>
+<Card noPad class={cx($$props.class, "overflow-hidden border border-solid border-neutral-600 shadow-lg")}>
+  <slot />
 </Card>

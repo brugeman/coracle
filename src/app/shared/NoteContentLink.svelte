@@ -1,15 +1,25 @@
 <script lang="ts">
-  import {isShareableRelay} from "paravel"
+  import {isShareableRelayUrl} from "paravel"
   import {displayUrl} from "src/util/misc"
   import Anchor from "src/partials/Anchor.svelte"
   import Media from "src/partials/Media.svelte"
   import {router} from "src/app/router"
 
   export let value
-  export let showMedia
+  export let showMedia = false
 
   const close = () => {
     hidden = true
+  }
+
+  const getUrlWithHash = () => {
+    let url = value.url
+
+    if (value.hash) {
+      url += `#${value.hash}`
+    }
+
+    return url
   }
 
   let hidden = false
@@ -28,12 +38,12 @@
     href={router.at("media").of(value.url).toString()}>
     {displayUrl(value.url)}
   </Anchor>
-{:else if isShareableRelay(value.url)}
+{:else if isShareableRelayUrl(value.url)}
   <Anchor
     modal
     stopPropagation
     class="overflow-hidden text-ellipsis whitespace-nowrap underline"
-    href={router.at("relays").of(value.url).toString()}>
+    href={router.at("relays").of(getUrlWithHash()).toString()}>
     {displayUrl(value.url)}
   </Anchor>
 {:else}
@@ -41,7 +51,7 @@
     external
     stopPropagation
     class="overflow-hidden text-ellipsis whitespace-nowrap underline"
-    href={value.url}>
+    href={getUrlWithHash()}>
     {displayUrl(value.url)}
   </Anchor>
 {/if}

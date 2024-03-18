@@ -6,22 +6,34 @@
   import {fly} from "src/util/transition"
   import {createScroller} from "src/util/misc"
   import Spinner from "src/partials/Spinner.svelte"
+  import Anchor from "src/partials/Anchor.svelte"
+  import Popover from "src/partials/Popover.svelte"
+  import Toggle from "src/partials/Toggle.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import ImageInput from "src/partials/ImageInput.svelte"
   import type {Event} from "src/engine"
-  import {canSign} from "src/engine"
+  import {nip44} from "src/engine"
 
+  export let pubkeys
   export let messages: Event[]
   export let sendMessage
+  export let initialMessage = ""
+
+  const limit = writable(10)
+  const loading = sleep(30_000)
 
   let textarea
   let container
   let scroller
-  let limit = writable(10)
-  let loading = sleep(30_000)
+  let useNip44 = true
   let showNewMessages = false
   let groupedMessages = []
 
   onMount(() => {
+    if (textarea) {
+      textarea.value = initialMessage
+    }
+
     scroller = createScroller(async () => limit.update(l => l + 10), {
       element: container,
       reverse: true,
@@ -29,7 +41,7 @@
   })
 
   onDestroy(() => {
-    scroller.stop()
+    scroller?.stop()
   })
 
   const scrollToBottom = () => container.scrollIntoView({behavior: "smooth", block: "end"})
@@ -46,7 +58,7 @@
   }
 
   const addImage = imeta => {
-    textarea.value += "\n" + imeta.type("url").values().first()
+    textarea.value += "\n" + imeta.get("url").value()
   }
 
   const send = async () => {
@@ -55,7 +67,7 @@
     if (content) {
       textarea.value = ""
 
-      await sendMessage(content)
+      await sendMessage(content, useNip44)
 
       stickToBottom()
     }
@@ -77,7 +89,7 @@
     const result = reverse(
       sortBy(prop("created_at"), messages).reduce((mx, m) => {
         return mx.concat({...m, showProfile: m.pubkey !== last(mx)?.pubkey})
-      }, [])
+      }, []),
     )
 
     setTimeout(stickToBottom, 100)
@@ -91,64 +103,92 @@
     showNewMessages = false
   }} />
 
-<div class="flex h-full gap-4">
-  <div class="relative w-full">
-    <div class="-mt-16 flex h-screen flex-col pt-16" class:pb-24={$canSign}>
-      <ul
-        bind:this={container}
-        class="flex flex-grow flex-col-reverse justify-start overflow-auto p-4 pb-6">
-        {#each groupedMessages as m (m.id)}
-          <li in:fly={{y: 20}} class="grid gap-2 py-1">
-            <slot name="message" message={m} />
-          </li>
-        {/each}
-        {#await loading}
-          <Spinner>Looking for messages...</Spinner>
-        {:then}
-          <div in:fly={{y: 20}} class="py-20 text-center">End of message history</div>
-        {/await}
-      </ul>
-    </div>
-    <div
-      class="fixed top-0 z-20 -mt-px w-full border-b border-solid border-gray-6 bg-gray-7 lg:pr-48">
-      <slot name="header" />
-    </div>
-    {#if $canSign}
-      <div
-        class="fixed bottom-0 z-10 flex w-full border-t border-solid border-gray-6 border-gray-7 bg-gray-6 lg:-ml-48 lg:pl-48">
-        <textarea
-          rows="3"
-          autofocus
-          placeholder="Type something..."
-          bind:this={textarea}
-          on:keydown={onKeyDown}
-          class="w-full resize-none bg-gray-6 p-2
-               text-gray-2 outline-0 placeholder:text-gray-1" />
-        <div>
-          <ImageInput multi on:change={e => addImage(e.detail)}>
-            <button
-              slot="button"
-              class="flex cursor-pointer flex-col justify-center gap-2 border-l border-solid border-gray-7 p-3
-                   py-6 text-gray-2 transition-all hover:bg-accent">
-              <i class="fa-solid fa-paperclip fa-lg" />
-            </button>
-          </ImageInput>
-          <button
-            on:click={send}
-            class="flex cursor-pointer flex-col justify-center gap-2 border-l border-solid border-gray-7 p-3
-                 py-6 text-gray-2 transition-all hover:bg-accent">
-            <i class="fa-solid fa-paper-plane fa-lg" />
-          </button>
-        </div>
+<div class="fixed inset-0 z-chat flex flex-col bg-neutral-800 lg:ml-72">
+  <div class="bg-neutral-900">
+    <slot name="header" />
+  </div>
+  <ul
+    bind:this={container}
+    class="flex flex-grow flex-col-reverse justify-start overflow-auto p-4 pb-6">
+    {#each groupedMessages as m (m.id)}
+      <li in:fly={{y: 20}} class="grid gap-2 py-1">
+        <slot name="message" message={m} />
+      </li>
+    {/each}
+    {#await loading}
+      <Spinner>Looking for messages...</Spinner>
+    {:then}
+      <div in:fly={{y: 20}} class="py-20 text-center">End of message history</div>
+    {/await}
+  </ul>
+  {#if $nip44.isEnabled() || pubkeys.length < 3}
+    {#if $nip44.isEnabled()}
+      <div class="m-2 mt-0 flex items-center justify-end gap-2">
+        <Toggle scale={0.7} bind:value={useNip44} />
+        <small>
+          Send messages using
+          <Popover class="inline">
+            <span slot="trigger" class="cursor-pointer underline">NIP 44</span>
+            <div slot="tooltip" class="flex flex-col gap-2">
+              <p>
+                When enabled, Coracle will use nostr's new group chat specification, which solves
+                several problems with legacy DMs. Read more <Anchor
+                  underline
+                  modal
+                  href="/help/nip-44-dms">here</Anchor
+                >.
+              </p>
+              <p>
+                Note that these messages are not yet universally supported. Make sure the person
+                you're chatting with is using a compatible nostr client.
+              </p>
+            </div>
+          </Popover>
+        </small>
       </div>
     {/if}
-  </div>
+    <div
+      class="flex border-t border-solid border-neutral-600 border-tinted-700 bg-neutral-900 dark:bg-neutral-600">
+      <textarea
+        rows="3"
+        autofocus
+        placeholder="Type something..."
+        bind:this={textarea}
+        on:keydown={onKeyDown}
+        class="w-full resize-none bg-transparent p-2
+             text-neutral-100 outline-0 placeholder:text-neutral-100" />
+      <div>
+        <ImageInput multi on:change={e => addImage(e.detail)}>
+          <button
+            slot="button"
+            class="flex cursor-pointer flex-col justify-center gap-2 border-l border-solid border-tinted-700 p-3
+                 py-6 text-neutral-100 transition-all hover:bg-accent hover:text-white">
+            <i class="fa-solid fa-paperclip fa-lg" />
+          </button>
+        </ImageInput>
+        <button
+          on:click={send}
+          class="flex cursor-pointer flex-col justify-center gap-2 border-l border-solid border-tinted-700 p-3
+               py-6 text-neutral-100 transition-all hover:bg-accent hover:text-white">
+          <i class="fa-solid fa-paper-plane fa-lg" />
+        </button>
+      </div>
+    </div>
+  {:else}
+    <FlexColumn class="bg-neutral-900 px-4 py-2">
+      <p class="flex items-center gap-2">
+        <i class="fa fa-info-circle p-1" />
+        You are using a login method that doesn't yet support group chats. Please consider upgrading
+        your signer to access this feature.
+      </p>
+    </FlexColumn>
+  {/if}
   {#if showNewMessages}
     <div
       class="fixed bottom-32 flex w-full cursor-pointer justify-center"
       transition:fly|local={{y: 20}}
       on:click={scrollToBottom}>
-      <div class="rounded-full bg-accent px-4 py-2 text-gray-2">New messages found</div>
+      <div class="rounded-full bg-accent px-4 py-2 text-neutral-100">New messages found</div>
     </div>
   {/if}
 </div>

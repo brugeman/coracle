@@ -1,10 +1,9 @@
+import {decodeAddress, isReplaceable, addressToFilter, getAddress, isContextAddress} from "paravel"
 import {omit, without, find, prop, groupBy, uniq} from "ramda"
 import {shuffle, randomId, seconds, avg} from "hurdak"
-import {Tags} from "paravel"
-import {Naddr} from "src/util/nostr"
-import {env, pubkey} from "src/engine/session/state"
+import {env} from "src/engine/session/state"
 import {follows, network} from "src/engine/people/derived"
-import {mergeHints, getPubkeyHints} from "src/engine/relays/utils"
+import {hints} from "src/engine/relays/utils"
 import type {DynamicFilter, Filter} from "../model"
 
 export const calculateFilterGroup = ({since, until, limit, search, ...filter}: Filter) => {
@@ -44,7 +43,7 @@ export const getIdFilters = values => {
 
   for (const value of values) {
     if (value.includes(":")) {
-      aFilters.push(Naddr.fromTagValue(value).asFilter())
+      aFilters.push(addressToFilter(decodeAddress(value)))
     } else {
       ids.push(value)
     }
@@ -66,10 +65,12 @@ export const getReplyFilters = (events, filter) => {
   for (const event of events) {
     e.push(event.id)
 
-    if (event.kind >= 10000) {
-      const d = Tags.from(event).getValue("d") || ""
+    if (isReplaceable(event)) {
+      a.push(getAddress(event))
+    }
 
-      a.push([event.kind, event.pubkey, d].join(":"))
+    if (event.wrap) {
+      e.push(event.wrap.id)
     }
   }
 
@@ -163,10 +164,18 @@ export const compileFilters = (filters: DynamicFilter[], opts: CompileFiltersOpt
 }
 
 export const getRelaysFromFilters = filters =>
-  mergeHints(
-    filters.flatMap(filter =>
-      filter.authors
-        ? filter.authors.map(pubkey => getPubkeyHints(pubkey, "write"))
-        : [getPubkeyHints(pubkey.get(), "read")]
+  hints
+    .merge(
+      filters.map(filter => {
+        if (filter["#a"]?.some(isContextAddress)) {
+          return hints.WithinMultipleContexts(filter["#a"].filter(isContextAddress))
+        }
+
+        if (filter.authors) {
+          return hints.FromPubkeys(shuffle(filter.authors))
+        }
+
+        return hints.ReadRelays()
+      }),
     )
-  )
+    .getUrls()

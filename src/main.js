@@ -1,20 +1,8 @@
 import "src/app.css"
 
 import {identity} from "ramda"
-import {Fetch, Storage, createMap} from "hurdak"
-
-if (Storage.hasItem("Keys.pubkey")) {
-  const pubkey = Storage.getJson("Keys.pubkey")
-  const sessions = Storage.getJson("Keys.keyState")
-
-  Storage.clear()
-
-  if (pubkey) {
-    Storage.setJson("pubkey", pubkey)
-    Storage.setJson("sessions", createMap("pubkey", sessions))
-  }
-}
-
+import {Fetch} from "hurdak"
+import {normalizeRelayUrl} from "paravel"
 import Bugsnag from "@bugsnag/js"
 import {tryFetch} from "src/util/misc"
 import {env, saveRelay} from "src/engine"
@@ -38,6 +26,10 @@ window.addEventListener("beforeinstallprompt", e => {
 
 const fromCsv = s => (s || "").split(",").filter(identity)
 
+const CLIENT_ID = import.meta.env.VITE_CLIENT_ID
+
+const CLIENT_NAME = import.meta.env.VITE_CLIENT_NAME
+
 const IMGPROXY_URL = import.meta.env.VITE_IMGPROXY_URL
 
 const DUFFLEPUD_URL = import.meta.env.VITE_DUFFLEPUD_URL
@@ -46,50 +38,61 @@ const MULTIPLEXTR_URL = import.meta.env.VITE_MULTIPLEXTR_URL
 
 const NIP96_URLS = fromCsv(import.meta.env.VITE_NIP96_URLS)
 
-const FORCE_RELAYS = fromCsv(import.meta.env.VITE_FORCE_RELAYS)
+const FORCE_GROUP = import.meta.env.VITE_FORCE_GROUP
 
-const DVM_RELAYS = FORCE_RELAYS.length > 0 ? FORCE_RELAYS : fromCsv(import.meta.env.VITE_DVM_RELAYS)
+const PLATFORM_RELAYS = fromCsv(import.meta.env.VITE_PLATFORM_RELAYS).map(normalizeRelayUrl)
 
-const SEARCH_RELAYS =
-  FORCE_RELAYS.length > 0 ? FORCE_RELAYS : ["wss://relay.nostr.band", "wss://nostr.wine"]
+const DVM_RELAYS = fromCsv(import.meta.env.VITE_DVM_RELAYS).map(normalizeRelayUrl)
 
-const DEFAULT_RELAYS =
-  FORCE_RELAYS.length > 0 ? FORCE_RELAYS : fromCsv(import.meta.env.VITE_DEFAULT_RELAYS)
+const SEARCH_RELAYS = fromCsv(import.meta.env.VITE_SEARCH_RELAYS).map(normalizeRelayUrl)
+
+const DEFAULT_RELAYS = fromCsv(import.meta.env.VITE_DEFAULT_RELAYS).map(normalizeRelayUrl)
 
 const DEFAULT_FOLLOWS = fromCsv(import.meta.env.VITE_DEFAULT_FOLLOWS)
 
+const ONBOARDING_LISTS = fromCsv(import.meta.env.VITE_ONBOARDING_LISTS)
+
 const ENABLE_ZAPS = JSON.parse(import.meta.env.VITE_ENABLE_ZAPS)
 
-const ENABLE_GROUPS = JSON.parse(import.meta.env.VITE_ENABLE_GROUPS)
+const ENABLE_MARKET = JSON.parse(import.meta.env.VITE_ENABLE_MARKET)
 
-const ENABLE_JUKEBOX = JSON.parse(import.meta.env.VITE_ENABLE_JUKEBOX)
+const PLATFORM_PUBKEY = import.meta.env.VITE_PLATFORM_PUBKEY
+
+const PLATFORM_ZAP_SPLIT = parseFloat(import.meta.env.VITE_PLATFORM_ZAP_SPLIT)
 
 // Prep our env
 env.set({
+  CLIENT_ID,
+  CLIENT_NAME,
+  ONBOARDING_LISTS,
   DEFAULT_FOLLOWS,
   NIP96_URLS,
   IMGPROXY_URL,
   DUFFLEPUD_URL,
   MULTIPLEXTR_URL,
-  FORCE_RELAYS,
+  FORCE_GROUP,
+  PLATFORM_RELAYS,
   DVM_RELAYS,
   SEARCH_RELAYS,
   DEFAULT_RELAYS,
   ENABLE_ZAPS,
-  ENABLE_GROUPS,
-  ENABLE_JUKEBOX,
+  ENABLE_MARKET,
+  PLATFORM_PUBKEY,
+  PLATFORM_ZAP_SPLIT,
 })
 
 // Throw some hardcoded defaults in there
 DEFAULT_RELAYS.forEach(saveRelay)
 
 // Load relays from nostr.watch via dufflepud
-if (FORCE_RELAYS.length === 0 && DUFFLEPUD_URL) {
-  tryFetch(async () => {
-    const json = await Fetch.fetchJson(DUFFLEPUD_URL + "/relay")
+if (DUFFLEPUD_URL) {
+  setTimeout(() => {
+    tryFetch(async () => {
+      const json = await Fetch.fetchJson(DUFFLEPUD_URL + "/relay")
 
-    json.relays.forEach(saveRelay)
-  })
+      json.relays.forEach(saveRelay)
+    })
+  }, 3000)
 }
 
 export default new App({

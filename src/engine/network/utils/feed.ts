@@ -1,12 +1,13 @@
-import {partition, prop, uniqBy, identity, pluck, sortBy, without, any, assoc} from "ramda"
+import {partition, concat, prop, uniqBy, identity, without, assoc} from "ramda"
 import {ensurePlural, doPipe, batch} from "hurdak"
-import {now, hasValidSignature, Tags} from "paravel"
-import {race, tryJson} from "src/util/misc"
+import {now, Tags, getIdOrAddress, getIdAndAddress} from "paravel"
+import {race} from "src/util/misc"
 import {info} from "src/util/logger"
-import {LOCAL_RELAY_URL, noteKinds, reactionKinds, repostKinds} from "src/util/nostr"
+import {noteKinds, reactionKinds, repostKinds} from "src/util/nostr"
 import type {DisplayEvent} from "src/engine/notes/model"
 import type {Event} from "src/engine/events/model"
-import {isEventMuted} from "src/engine/events/derived"
+import {sortEventsDesc, unwrapRepost} from "src/engine/events/utils"
+import {isEventMuted, isDeleted} from "src/engine/events/derived"
 import {writable} from "src/engine/core/utils"
 import type {Filter} from "../model"
 import {getIdFilters, guessFilterDelta} from "./filters"
@@ -19,7 +20,7 @@ export type FeedOpts = {
   relays: string[]
   filters: Filter[]
   onEvent?: (e: Event) => void
-  shouldDefer?: boolean
+  anchor?: string
   shouldListen?: boolean
   shouldBuffer?: boolean
   shouldHideReplies?: boolean
@@ -36,16 +37,17 @@ export class FeedLoader {
   reposts = new Map<string, Event[]>()
   replies = new Map<string, Event[]>()
   deferred: Event[] = []
-  remoteCursor: MultiCursor
-  localCursor: MultiCursor
+  cursor: MultiCursor
   ready: Promise<void>
   isEventMuted = isEventMuted.get()
+  isDeleted = isDeleted.get()
 
   constructor(readonly opts: FeedOpts) {
     const urls = getUrls(opts.relays)
+    const filters = ensurePlural(opts.filters)
 
     // No point in subscribing if we have an end date
-    if (opts.shouldListen && !any(prop("until"), ensurePlural(opts.filters) as any[])) {
+    if (opts.shouldListen && !filters.some(prop("until"))) {
       this.addSubs([
         subscribe({
           relays: urls,
@@ -67,7 +69,7 @@ export class FeedLoader {
       ])
     }
 
-    this.remoteCursor = new MultiCursor({
+    this.cursor = new MultiCursor({
       relays: opts.relays,
       filters: opts.filters,
       onEvent: batch(100, events => {
@@ -77,26 +79,14 @@ export class FeedLoader {
       }),
     })
 
-    this.localCursor = new MultiCursor({
-      relays: [LOCAL_RELAY_URL],
-      filters: opts.filters,
-      onEvent: batch(100, events => {
-        if (opts.shouldLoadParents) {
-          this.loadParents(this.discardEvents(events))
-        }
-      }),
-    })
-
-    const remoteSubs = this.remoteCursor.load(50)
-    const localSubs = this.localCursor.load(50)
+    const remoteSubs = this.cursor.load(50)
 
     this.addSubs(remoteSubs)
-    this.addSubs(localSubs)
 
     // Wait until a good number of subscriptions have completed to reduce the chance of
     // out of order notes
     this.ready = race(
-      0.2,
+      0.4,
       remoteSubs.map(s => new Promise(r => s.on("close", r))),
     )
   }
@@ -106,11 +96,19 @@ export class FeedLoader {
     const strict = this.opts.filters.some(f => f["#a"])
 
     return events.filter(e => {
+      if (this.isDeleted(e)) {
+        return false
+      }
+
       if (this.isEventMuted(e, strict)) {
         return false
       }
 
-      if (this.opts.shouldHideReplies && Tags.from(e).getReply()) {
+      if (this.opts.shouldHideReplies && Tags.fromEvent(e).parent()) {
+        return false
+      }
+
+      if (getIdOrAddress(e) === this.opts.anchor) {
         return false
       }
 
@@ -119,9 +117,14 @@ export class FeedLoader {
   }
 
   loadParents = notes => {
+    // Add notes to parents too since they might match
+    for (const e of notes) {
+      this.parents.set(e.id, e)
+    }
+
     const parentIds = notes
       .filter(e => !repostKinds.includes(e.kind) && !this.isEventMuted(e))
-      .map(e => Tags.from(e).getReply())
+      .map(e => Tags.fromEvent(e).parent()?.value())
       .filter(identity)
 
     load({
@@ -158,37 +161,32 @@ export class FeedLoader {
   // Feed building
 
   buildFeedChunk = (notes: Event[]) => {
-    const seen = new Set(pluck("id", this.notes.get()))
+    const seen = new Set(this.notes.get().map(getIdOrAddress))
     const parents = []
 
-    return sortBy(
-      (e: DisplayEvent) => -e.created_at,
+    // Sort first to make sure we get the latest version of replaceable events, then
+    // after to make sure notes replaced by their parents are in order.
+    return sortEventsDesc(
       uniqBy(
         prop("id"),
-        notes
+        sortEventsDesc(notes)
           .map((e: Event) => {
             // If we have a repost, use its contents instead
             if (repostKinds.includes(e.kind)) {
-              const wrappedEvent = tryJson(() => JSON.parse(e.content))
+              const wrappedEvent = unwrapRepost(e)
 
-              if (wrappedEvent && hasValidSignature(wrappedEvent)) {
-                const originalGroup = Tags.from(wrappedEvent).communities().first()
-                const repostGroup = Tags.from(e).communities().first()
+              if (wrappedEvent) {
+                const reposts = this.reposts.get(wrappedEvent.id) || []
 
-                // Only show cross-posts, not reposts from global to global
-                if (originalGroup !== repostGroup) {
-                  const reposts = this.reposts.get(wrappedEvent.id) || []
+                this.reposts.set(wrappedEvent.id, [...reposts, e])
 
-                  this.reposts.set(wrappedEvent.id, [...reposts, e])
-
-                  e = {...wrappedEvent, seen_on: e.seen_on}
-                }
+                e = {...wrappedEvent, seen_on: e.seen_on}
               }
             }
 
             // Keep track of replies
             if (noteKinds.includes(e.kind)) {
-              const parentId = Tags.from(e).getReply()
+              const parentId = Tags.fromEvent(e).parent()?.value()
               const replies = this.replies.get(parentId) || []
 
               this.replies.set(parentId, [...replies, e])
@@ -196,7 +194,7 @@ export class FeedLoader {
 
             // If we have a parent, show that instead, with replies grouped underneath
             while (true) {
-              const parentId = Tags.from(e).getReply()
+              const parentId = Tags.fromEvent(e).parent()?.value()
 
               if (!parentId) {
                 break
@@ -216,15 +214,17 @@ export class FeedLoader {
           .concat(parents)
           // If we've seen this note or its parent, don't add it again
           .filter(e => {
-            if (seen.has(e.id)) return false
+            if (seen.has(getIdOrAddress(e))) return false
             if (repostKinds.includes(e.kind)) return false
             if (reactionKinds.includes(e.kind)) return false
+
+            seen.add(getIdOrAddress(e))
 
             return true
           })
           .map((e: DisplayEvent) => {
-            e.replies = this.replies.get(e.id)
-            e.reposts = this.reposts.get(e.id)
+            e.replies = getIdAndAddress(e).flatMap(k => this.replies.get(k) || [])
+            e.reposts = getIdAndAddress(e).flatMap(k => this.reposts.get(k) || [])
 
             return e
           }),
@@ -248,33 +248,26 @@ export class FeedLoader {
   async load(n) {
     await this.ready
 
+    if (this.cursor.done()) {
+      return
+    }
+
     info(`Loading ${n} more events`, {
       filters: this.opts.filters,
       relays: this.opts.relays,
     })
 
-    const [subs, events] = this.remoteCursor.take(n)
-    const notes = this.discardEvents(events)
+    const [subs, events] = this.cursor.take(n)
 
     this.addSubs(subs)
 
-    let ok = notes
-
-    // Skip anything out of order or missing context
-    if (this.opts.shouldDefer) {
-      ok = doPipe(notes.concat(this.deferred.splice(0)), [this.deferOrphans, this.deferAncient])
-    }
-
-    // If we have nothing load something from the cache to keep the user happy
-    if (ok.length === 0) {
-      const [subs, events] = this.localCursor.take(1)
-
-      this.addSubs(subs)
-
-      ok = events
-    }
-
-    this.addToFeed(ok)
+    this.addToFeed(
+      doPipe(this.discardEvents(events), [
+        concat(this.deferred.splice(0)),
+        this.deferOrphans,
+        this.deferAncient,
+      ]),
+    )
   }
 
   loadBuffer() {
@@ -291,13 +284,13 @@ export class FeedLoader {
     }
 
     // If something has a parent id but we haven't found the parent yet, skip it until we have it.
-    const [defer, ok] = partition(e => {
-      const parentId = Tags.from(e).getReply()
+    const [ok, defer] = partition(e => {
+      const parent = Tags.fromEvent(e).parent()
 
-      return parentId && !this.parents.get(parentId)
+      return !parent || this.parents.has(parent.value())
     }, notes)
 
-    setTimeout(() => this.addToFeed(defer), 1500)
+    setTimeout(() => this.addToFeed(defer), 3000)
 
     return ok
   }
@@ -307,9 +300,9 @@ export class FeedLoader {
     // them after we have more timely data. They still might be relevant, but order will still
     // be maintained since everything before the cutoff will be deferred the same way.
     const since = now() - guessFilterDelta(this.opts.filters)
-    const [defer, ok] = partition(e => e.created_at < since, notes)
+    const [ok, defer] = partition(e => e.created_at > since, notes)
 
-    setTimeout(() => this.addToFeed(defer), 4000)
+    setTimeout(() => this.addToFeed(defer), 5000)
 
     return ok
   }

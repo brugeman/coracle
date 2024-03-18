@@ -1,5 +1,6 @@
 <script lang="ts">
   import cx from "classnames"
+  import logger from "src/util/logger"
   import {DateInput} from "date-picker-svelte"
   import {createLocalDate, formatDateAsLocalISODate} from "src/util/misc"
 
@@ -10,13 +11,17 @@
 
   const className = cx(
     $$props.class,
-    "rounded-full shadow-inset py-2 px-4 w-full placeholder:text-gray-5",
-    "bg-input border border-solid border-gray-3 text-black pl-10"
+    "rounded-full shadow-inset py-2 px-4 w-full placeholder:text-neutral-400",
+    "bg-white border border-solid border-neutral-200 text-black pl-10",
   )
 
   const setDate = d => {
-    date = d
-    value = formatDateAsLocalISODate(d).slice(0, 10)
+    try {
+      value = formatDateAsLocalISODate(d).slice(0, 10)
+      date = d
+    } catch (e) {
+      logger.error(e)
+    }
   }
 
   const init = () => {

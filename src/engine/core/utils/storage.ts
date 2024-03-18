@@ -1,6 +1,7 @@
 import {prop, identity, pluck, splitAt, nth, sortBy} from "ramda"
 import {sleep, defer, chunk, randomInt, throttle} from "hurdak"
 import {Storage as LocalStorage} from "hurdak"
+import logger from "src/util/logger"
 import {sessions} from "src/engine/session/state"
 import {people} from "src/engine/people/state"
 import type {Writable, Collection} from "./store"
@@ -53,7 +54,7 @@ export class IndexedDB {
           try {
             this.db.createObjectStore(o.name, o.opts)
           } catch (e) {
-            console.warn(e)
+            logger.warn(e)
           }
         })
       }
@@ -150,7 +151,7 @@ export class LocalStorageAdapter {
     const {key, store, opts} = this
     const {load, dump} = opts || {load: identity, dump: identity}
 
-    if (Object.hasOwn(localStorage, key)) {
+    if (key in localStorage) {
       store.set(load(LocalStorage.getJson(key)))
     }
 
@@ -164,6 +165,8 @@ export class IndexedDBAdapter {
     readonly store: Collection<any>,
     readonly max: number,
     readonly sort?: (xs: any[]) => any[],
+    readonly filter?: (x: any) => boolean,
+    readonly migrate?: (xs: any[]) => any[],
   ) {}
 
   getIndexedDBConfig() {
@@ -177,8 +180,11 @@ export class IndexedDBAdapter {
 
   async initialize(storage: Storage) {
     const {key, store} = this
+    const data = await storage.db.getAll(key)
+    const filter = this.filter || identity
+    const migrate = this.migrate || identity
 
-    store.set(await storage.db.getAll(key))
+    store.set(migrate(data.filter(filter)))
 
     store.subscribe(
       throttle(randomInt(3000, 5000), async <T>(rows: T) => {

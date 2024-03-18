@@ -13,14 +13,16 @@
   export let event = null
   export let progress = null
 
-  const {succeeded, timeouts, failed} = progress
-
   const retry = () => {
-    const relays = Array.from(union(timeouts, failed)) as string[]
+    const relays = Array.from(union(progress.timeouts, progress.failed)) as string[]
 
     Publisher.publish({relays, event}).on("progress", toastProgress)
 
     router.pop()
+  }
+
+  if (!progress) {
+    router.at("/").replace()
   }
 </script>
 
@@ -56,14 +58,15 @@
     {/if}
     <div class="flex justify-center gap-2">
       {#if progress.succeeded.size < progress.attempted.size}
-        <Anchor theme="button" on:click={retry}>Try again</Anchor>
+        <Anchor button on:click={retry}>Try again</Anchor>
       {/if}
       {#if progress.succeeded.size > 0}
         <Anchor
-          theme="button-accent"
+          button
+          accent
           href={router
             .at("notes")
-            .of(eid, {relays: Array.from(succeeded)})
+            .of(eid, {relays: Array.from(progress.succeeded)})
             .toString()}>
           View your note
         </Anchor>

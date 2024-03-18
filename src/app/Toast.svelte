@@ -43,18 +43,17 @@
       on:touchstart={onTouchStart}
       on:touchmove={onTouchMove}
       on:touchend={onTouchEnd}
-      class="pointer-events-none fixed left-0 right-0 top-0 z-30 flex justify-center"
+      class="pointer-events-none fixed left-0 right-0 top-0 z-toast flex justify-center"
       transition:fly={{y: -50, duration: 300}}>
       <div
         style={`transform: translate(${offset}px, 0)`}
         class={cx(
-          "pointer-events-auto m-2 rounded border p-3 text-center shadow-xl sm:ml-2",
-          "max-w-xl flex-grow transition-all",
+          "pointer-events-auto m-2 rounded border p-3 pr-8 text-center shadow-xl sm:ml-2",
+          "relative max-w-xl flex-grow transition-all",
           {
-            "border-gray-6 bg-gray-7 text-gray-2": $toast.type === "info",
-            "border-warning bg-gray-7 text-gray-2": $toast.type === "warning",
-            "border-danger bg-gray-7 text-gray-2": $toast.type === "error",
-          }
+            "border-neutral-600 bg-tinted-700 text-neutral-100": $toast.type === "info",
+            "border-warning bg-tinted-700 text-neutral-100": $toast.type === "warning",
+          },
         )}>
         {#if is(String, $toast.message)}
           {$toast.message}
@@ -71,6 +70,9 @@
             {/if}
           </div>
         {/if}
+        <div class="absolute right-1 top-0 cursor-pointer p-3" on:click={() => toast.set(null)}>
+          <i class="fa fa-times" />
+        </div>
       </div>
     </div>
   {/key}

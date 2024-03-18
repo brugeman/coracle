@@ -1,9 +1,115 @@
 # Changelog
 
+# 0.4.4
+
+- [x] Format time and date based on browser regional settings
+- [x] Rename `FORCE_RELAYS` to `PLATFORM_RELAYS`
+- [x] Stop reading kind 3 relays
+- [x] Publish q tags
+- [x] Add sugggested relays based on follows
+- [x] Improve invite creation
+- [x] Added docker image (@kornpow)
+- [x] Code split by route
+- [x] Add fixed footer for settings forms
+- [x] Add claim query param to group detail
+- [x] Add admin key import
+- [x] Improve hashtag regex (@zen)
+- [x] Add rendering support for cashu tokens
+
+
+# 0.4.3
+
+- [x] Add follow all to onboarding topics
+- [x] Add FORCE_RELAYS environment variable
+- [x] Add support for extensions that implement nip44
+- [x] Add zap splits
+- [x] Add default platform split amount
+- [x] Add invite link generation
+- [x] Use new web of trust display
+- [x] Show loading when searching profiles
+- [x] Apply new note styles and theme
+- [x] Redirect to onboarding from invite link if no user
+- [x] Fix legacy messages
+
+# 0.4.2
+
+- [x] Require signer on some routes
+- [x] Add group notes to group notifications
+- [x] Add badges to all notification page tabs
+- [x] Use better search algorithm and show loaded profiles in global search
+- [x] Improve group invite deliverability
+- [x] Add nostr connect support
+- [x] Re-work onboarding entirely
+- [x] Fix some list-related bugs
+- [x] Migrate lists from `name` to `title`
+- [x] Add list `description`
+- [x] Skip confirm on logout
+- [x] Add initial onboarding notification to back up keys
+
+# 0.4.1
+
+- [x] Fix pubkey display in PersonAbout
+- [x] Hide deleted calendar events
+- [x] Show date on calendar event notes
+- [x] Add edit for calendar events
+- [x] Add delete for calendar events
+- [x] Fix word count on mobile
+- [x] Fix search results opening twice
+- [x] Fix list edit
+- [x] Expand notes inline when clicking "Show More"
+- [x] Refresh pages when navigating to the current page
+- [x] Remove duplicate media from listings
+- [x] Add listing edit and delete
+- [x] Navigate to notes by address when possible
+- [x] Remove query string from imgproxy payload
+- [x] Remove duplicates by address from feeds
+- [x] Add mention action to person detail page
+- [x] Fix replies not showing right away
+- [x] Scroll to top on navigate
+- [x] Support read receipts for notifications
+- [x] Fix conversations view when logged in with multiple accounts
+- [x] Add status to listings
+- [x] Fix initial message when opening conversation from a listing
+- [x] Support frequency value in `price` tag for nip 99
+- [x] Show all replies expands notes inline rather than opening the note
+- [x] Fix nip04 messages not having a members field
+- [x] Improve person search
+- [x] Fix zaps in private groups
+- [x] Improve relay selection for groups
+- [x] Fix DM compatibility UX
+- [x] Keep relays intact when publishing kind 3
+
 # 0.4.0
 
+- [x] Add NIP 44 encryption support
+- [x] Add NIP 24 chat support with NIP 04 backwards compatibility
 - [x] Add NIP 72 community support
 - [x] Add NIP 87 closed community support
+- [x] Add NIP 51 calendar event support
+- [x] Add NIP 99 classifieds support
+- [x] Support cross-posting
+- [x] Limit number of replies shown on feed
+- [x] Search results sorted by relevance weighted by WoT
+- [x] Add anonymous zaps
+- [x] Strip hash from media urls
+- [x] Start on @daniele's redesign
+- [x] Add bitcoin connect support
+- [x] Remove Apps page, move NIP 89 support to note info dialog
+- [x] Publish NIP 89 client tag
+- [x] Remove Explore page, move NIP 32 support to profile collections
+- [x] Replaced `FORCE_RELAYS` env variable with `FORCE_GROUP`
+- [x] Warn when a user might be publishing their nsec
+
+# 0.3.14
+
+- [x] Remove sliders icon, add plus button next to pills instead
+- [x] NIP 52 time-based calendar events publish/render
+- [x] NIP 99 classifieds publish/render
+- [x] Add support for bunker:// (@brugeman)
+- [x] Improve theme switching reactivity
+- [x] Re-work replies, note rendering, and feed controls
+- [x] Speed up login
+- [x] Better a-tag reply support
 
 # 0.3.13
 
@@ -69,6 +175,7 @@
 - [x] Fix link overflow when media previews are off
 - [x] Speed things up by using animations more sparingly
 - [x] Fix DM view scrolling and formatting of messages with links
+
 # 0.3.10
 
 - [x] Use local relay on all requests

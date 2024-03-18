@@ -8,11 +8,7 @@
 </script>
 
 <div
-  class={cx(
-    $$props.class,
-    `inline-block shrink-0 overflow-hidden rounded-full border border-solid
-     border-gray-1 bg-gray-9 bg-cover bg-center`
-  )}
+  class={cx($$props.class, "shrink-0 overflow-hidden rounded-full bg-cover bg-center")}
   style={`background-image: url(${url}); ${$$props.style || ""}`}>
   <slot />
 </div>

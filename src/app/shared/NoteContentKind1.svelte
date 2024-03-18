@@ -5,6 +5,7 @@
     getLinks,
     truncateContent,
     LINK,
+    CASHU,
     INVOICE,
     NEWLINE,
     ELLIPSIS,
@@ -23,15 +24,17 @@
 
   export let note
   export let maxLength = 700
-  export let anchorId = false
   export let showEntire = false
   export let showMedia = false
+  export let skipMedia = false
   export let expandable = true
+  export let isQuote = false
 
   const fullContent = parseContent(note)
-  const shortContent = truncateContent(fullContent, {maxLength, showEntire, showMedia})
-  const links = getLinks(shortContent)
-  const extraLinks = without(links, getLinks(fullContent))
+
+  const expand = () => {
+    showEntire = true
+  }
 
   export const isNewline = i =>
     !shortContent[i] ||
@@ -39,28 +42,35 @@
     (shortContent[i].type === TEXT && shortContent[i].value.match(/^\s+$/))
 
   export const isStartOrEnd = i => isNewline(i - 1) || isNewline(i + 1)
+
+  $: shortContent = truncateContent(fullContent, {maxLength, showEntire, showMedia, skipMedia})
+  $: links = getLinks(shortContent)
+  $: extraLinks = without(links, getLinks(fullContent))
+  $: ellipsize = expandable && shortContent.find(p => p.type === ELLIPSIS)
 </script>
 
-<div class="flex flex-col gap-2 overflow-hidden text-ellipsis">
-  <p>
+<div
+  class="flex flex-col gap-2 overflow-hidden text-ellipsis"
+  style={ellipsize && "mask-image: linear-gradient(0deg, transparent 0px, black 100px)"}>
+  <div>
     {#each shortContent as { type, value }, i}
       {#if type === NEWLINE}
         <NoteContentNewline {value} />
-      {:else if type === ELLIPSIS}
-        {#if expandable}
-          <NoteContentEllipsis />
-        {/if}
       {:else if type === TOPIC}
         <NoteContentTopic {value} />
+      {:else if type === CASHU}
+        <div on:click|stopPropagation>
+          <QRCode copyOnClick code={value} />
+        </div>
       {:else if type === INVOICE}
         <div on:click|stopPropagation>
-          <QRCode fullWidth onClick="copy" code={value} />
+          <QRCode copyOnClick code={value} />
         </div>
       {:else if type === LINK}
         <NoteContentLink {value} showMedia={showMedia && isStartOrEnd(i)} />
       {:else if type.match(/^nostr:np(rofile|ub)$/)}
         <PersonLink pubkey={value.pubkey} />
-      {:else if type.startsWith("nostr:") && isStartOrEnd(i) && value.id !== anchorId}
+      {:else if type.startsWith("nostr:") && isStartOrEnd(i)}
         <NoteContentQuote {note} {value}>
           <div slot="note-content" let:quote>
             <slot name="note-content" {quote} />
@@ -68,13 +78,19 @@
         </NoteContentQuote>
       {:else if type.startsWith("nostr:")}
         <NoteContentEntity {value} />
-      {:else}
+      {:else if type !== ELLIPSIS}
         {value}
       {/if}
       {" "}
     {/each}
-  </p>
+  </div>
   {#if showMedia && extraLinks.length > 0}
     <MediaSet links={extraLinks} />
   {/if}
 </div>
+
+{#if ellipsize}
+  <div class:-ml-12={!isQuote}>
+    <NoteContentEllipsis on:click={expand} />
+  </div>
+{/if}

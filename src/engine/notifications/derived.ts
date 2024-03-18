@@ -1,14 +1,18 @@
-import {prop, max, sortBy} from "ramda"
+import {assoc, without, max, sortBy} from "ramda"
 import {seconds} from "hurdak"
 import {now, Tags} from "paravel"
-import {reactionKinds} from "src/util/nostr"
+import {isLike, reactionKinds, noteKinds, repostKinds} from "src/util/nostr"
 import {tryJson} from "src/util/misc"
+import {isSeen} from "src/engine/events/derived"
+import {unwrapRepost} from "src/engine/events/utils"
 import {events, isEventMuted} from "src/engine/events/derived"
 import {derived} from "src/engine/core/utils"
-import {groupRequests, groupAlerts} from "src/engine/groups/state"
+import {groupRequests, groupAdminKeys, groupAlerts} from "src/engine/groups/state"
+import {getUserCircles} from "src/engine/groups/utils"
 import {pubkey} from "src/engine/session/state"
 import {session} from "src/engine/session/derived"
 import {userEvents} from "src/engine/events/derived"
+import {OnboardingTask} from "./model"
 
 export const notifications = derived(
   [pubkey, userEvents.mapStore.throttle(500), events.throttle(500)],
@@ -18,53 +22,105 @@ export const notifications = derived(
     }
 
     const $isEventMuted = isEventMuted.get()
+    const kinds = [...noteKinds, ...reactionKinds]
 
     return $events.filter(e => {
-      if (e.pubkey === $pubkey || $isEventMuted(e)) {
+      if (e.pubkey === $pubkey || $isEventMuted(e) || !kinds.includes(e.kind)) {
         return false
       }
 
-      const tags = Tags.from(e).normalize()
+      if (e.kind === 7 && !isLike(e)) {
+        return false
+      }
 
-      return (
-        $userEvents.get(tags.mark("root").getValue()) ||
-        $userEvents.get(tags.mark("reply").getValue()) ||
-        tags.pubkeys().has($pubkey)
-      )
+      const tags = Tags.fromEvent(e)
+
+      return $userEvents.get(tags.whereKey("e").parent()?.value()) || tags.values("p").has($pubkey)
     })
-  }
+  },
 )
 
-export const otherNotifications = derived([groupRequests, groupAlerts], ([$requests, $alerts]) =>
-  sortBy(
-    n => -n.created_at,
-    [
-      ...$requests.filter(r => !r.resolved).map(request => ({t: "request", ...request})),
-      ...$alerts.map(alert => ({t: "alert", ...alert})),
-    ]
+export const unreadNotifications = derived([isSeen, notifications], ([$isSeen, $notifications]) => {
+  const since = now() - seconds(30, "day")
+
+  return $notifications.filter(
+    e => !reactionKinds.includes(e.kind) && e.created_at > since && !$isSeen(e),
   )
+})
+
+export const groupNotifications = derived(
+  [session, events, groupRequests, groupAlerts, groupAdminKeys],
+  x => x,
+)
+  .throttle(3000)
+  .derived(([$session, $events, $requests, $alerts, $adminKeys, $addresses]) => {
+    const addresses = new Set(getUserCircles($session))
+    const adminPubkeys = new Set($adminKeys.map(k => k.pubkey))
+    const $isEventMuted = isEventMuted.get()
+
+    const shouldSkip = e => {
+      const tags = Tags.fromEvent(e)
+      const context = tags.context().values().valueOf()
+
+      return (
+        !context.some(a => addresses.has(a)) ||
+        !noteKinds.includes(e.kind) ||
+        e.pubkey === $session.pubkey ||
+        // Skip mentions since they're covered in normal notifications
+        tags.values("p").has($session.pubkey) ||
+        $isEventMuted(e)
+      )
+    }
+
+    return sortBy(
+      x => -x.created_at,
+      [
+        ...$requests.filter(r => !r.resolved).map(assoc("t", "request")),
+        ...$alerts.filter(a => !adminPubkeys.has(a.pubkey)).map(assoc("t", "alert")),
+        ...$events
+          .map(e => (repostKinds.includes(e.kind) ? unwrapRepost(e) : e))
+          .filter(e => e && !shouldSkip(e)),
+      ],
+    )
+  })
+
+export const unreadGroupNotifications = derived(
+  [isSeen, groupNotifications],
+  ([$isSeen, $groupNotifications]) => {
+    const since = now() - seconds(30, "day")
+
+    return $groupNotifications.filter(e => e.created_at > since && !$isSeen(e))
+  },
+)
+
+export const unreadCombinedNotifications = derived(
+  [unreadNotifications, unreadGroupNotifications],
+  ([$unreadNotifications, $unreadGroupNotifications]) =>
+    $unreadNotifications.concat($unreadGroupNotifications),
 )
 
 export const hasNewNotifications = derived(
-  [session, notifications, otherNotifications],
-  ([$session, $notifications, $otherNotifications]) => {
-    const maxCreatedAt = $notifications
-      .filter(e => !reactionKinds.includes(e.kind))
-      .concat($otherNotifications)
-      .map(prop("created_at"))
-      .reduce(max, 0)
+  [session, unreadCombinedNotifications],
+  ([$session, $unread]) => {
+    if ($unread.length > 0) {
+      return true
+    }
 
-    return maxCreatedAt > ($session?.notifications_last_synced || 0)
-  }
+    if ($session?.onboarding_tasks_completed) {
+      return without($session.onboarding_tasks_completed, Object.values(OnboardingTask)).length > 0
+    }
+
+    return false
+  },
 )
 
-export const groupNotifications = ($notifications, kinds) => {
+export const createNotificationGroups = ($notifications, kinds) => {
   const $userEvents = userEvents.mapStore.get()
 
   // Convert zaps to zap requests
   const convertZap = e => {
     if (e.kind === 9735) {
-      return tryJson(() => JSON.parse(Tags.from(e).getDict().description as string))
+      return tryJson(() => JSON.parse(Tags.fromEvent(e).get("description")?.value()))
     }
 
     return e
@@ -74,7 +130,7 @@ export const groupNotifications = ($notifications, kinds) => {
 
   // Group notifications by event
   for (const ix of $notifications) {
-    const parentId = Tags.from(ix).getReply()
+    const parentId = Tags.fromEvent(ix).whereKey("e").parent()?.value()
     const event = $userEvents.get(parentId)
 
     if (!kinds.includes(ix.kind)) {
@@ -104,6 +160,6 @@ export const groupNotifications = ($notifications, kinds) => {
         .reduce(max, 0)
 
       return {...group, timestamp}
-    })
+    }),
   )
 }

@@ -1,10 +1,16 @@
-import {Fetch} from "hurdak"
+import {Fetch, sleep, switcherFn} from "hurdak"
 import {createEvent} from "paravel"
+import {generatePrivateKey} from "src/util/nostr"
 import {warn} from "src/util/logger"
 import {signer} from "src/engine/session/derived"
-import {getZapperForPubkey} from "./utils"
+import {getClientTags} from "src/engine/network/utils"
+import {getLightningImplementation, getZapperForPubkey} from "./utils"
 
-export const requestZap = async (content, amount, {pubkey, relays, eid = null, lnurl = null}) => {
+export const requestZap = async (
+  content,
+  amount,
+  {pubkey, relays, eid = null, lnurl = null, anonymous = false},
+) => {
   const zapper = await getZapperForPubkey(pubkey, lnurl)
 
   if (!zapper) {
@@ -13,6 +19,7 @@ export const requestZap = async (content, amount, {pubkey, relays, eid = null, l
 
   const msats = amount * 1000
   const tags = [
+    ...getClientTags(),
     ["relays", ...relays],
     ["amount", msats.toString()],
     ["lnurl", zapper.lnurl],
@@ -23,7 +30,14 @@ export const requestZap = async (content, amount, {pubkey, relays, eid = null, l
     tags.push(["e", eid])
   }
 
-  const zap = await signer.get().signAsUser(createEvent(9734, {content, tags}))
+  if (anonymous) {
+    tags.push(["anon"])
+  }
+
+  const template = createEvent(9734, {content, tags})
+  const zap = anonymous
+    ? await signer.get().signWithKey(template, generatePrivateKey())
+    : await signer.get().signAsUser(template)
   const zapString = encodeURI(JSON.stringify(zap))
   const qs = `?amount=${msats}&nostr=${zapString}&lnurl=${zapper.lnurl}`
   const res = await Fetch.fetchJson(zapper.callback + qs)
@@ -35,16 +49,34 @@ export const requestZap = async (content, amount, {pubkey, relays, eid = null, l
   return res?.pr
 }
 
-export async function collectInvoice(invoice) {
+export async function collectInvoiceWithWebLn(invoice) {
   const {webln} = window as {webln?: any}
 
   if (webln) {
     await webln.enable()
 
     try {
-      webln.sendPayment(invoice)
+      await webln.sendPayment(invoice)
+
+      return true
     } catch (e) {
       warn(e)
     }
   }
 }
+
+export async function collectInvoiceWithBitcoinConnect(invoice) {
+  const bc = await import("@getalby/bitcoin-connect")
+
+  await sleep(300)
+
+  if (bc.isConnected()) {
+    bc.launchPaymentModal({invoice})
+  }
+}
+
+export const collectInvoice = async invoice =>
+  switcherFn(await getLightningImplementation(), {
+    webln: () => collectInvoiceWithWebLn(invoice),
+    bc: () => collectInvoiceWithBitcoinConnect(invoice),
+  })

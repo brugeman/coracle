@@ -1,6 +1,7 @@
 <script lang="ts">
   import {Tags} from "paravel"
-  import Content from "src/partials/Content.svelte"
+  import {onMount} from "svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import PersonBadgeSmall from "src/app/shared/PersonBadgeSmall.svelte"
   import NoteContentEllipsis from "src/app/shared/NoteContentEllipsis.svelte"
   import {loadPubkeys} from "src/engine"
@@ -8,22 +9,33 @@
   export let note
   export let showEntire
 
-  const limit = showEntire ? Infinity : 5
-  const pubkeys = Tags.from(note).type("p").values().all().slice(0, limit)
+  const expand = () => {
+    limit += 20
+  }
 
-  loadPubkeys(pubkeys)
+  let limit = showEntire ? Infinity : 5
+
+  $: pubkeys = Tags.fromEvent(note).values("p").take(limit).valueOf()
+
+  onMount(() => {
+    loadPubkeys(pubkeys)
+  })
 </script>
 
-<Content gap="gap-2" class="m-0">
-  <div class="mb-4 border-l-2 border-solid border-gray-5 pl-4 text-lg">Updated follows list:</div>
-  <div>
-    {#each pubkeys as pubkey}
-      <div class="inline-block rounded-full px-3 py-2 transition-colors hover:bg-gray-9">
-        <PersonBadgeSmall {pubkey} />
-      </div>
-    {/each}
+<FlexColumn small>
+  <div style={!showEntire && "mask-image: linear-gradient(0deg, transparent 0px, black 100px)"}>
+    <div class="mb-4 border-l-2 border-solid border-neutral-600 pl-4 text-lg">
+      Updated follows list:
+    </div>
+    <div>
+      {#each pubkeys as pubkey}
+        <div class="inline-block rounded-full px-3 py-2 transition-colors hover:bg-neutral-800">
+          <PersonBadgeSmall {pubkey} />
+        </div>
+      {/each}
+    </div>
   </div>
   {#if !showEntire}
-    <NoteContentEllipsis />
+    <NoteContentEllipsis on:click={expand} />
   {/if}
-</Content>
+</FlexColumn>

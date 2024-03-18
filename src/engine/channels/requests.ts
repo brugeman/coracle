@@ -1,66 +1,65 @@
-import {assocPath} from "ramda"
-import {batch, seconds} from "hurdak"
+import {assocPath, uniq} from "ramda"
+import {seconds, sleep} from "hurdak"
 import {now} from "paravel"
-import {EventKind} from "src/engine/events/model"
 import {sessions} from "src/engine/session/state"
 import {session} from "src/engine/session/derived"
-import {load, loadPubkeys, subscribe} from "src/engine/network/utils"
-import {getInboxHints, getPubkeyHints, getUserRelayUrls} from "src/engine/relays/utils"
-import {nip24Channels} from "./derived"
+import {loadPubkeys, subscribe, MultiCursor} from "src/engine/network/utils"
+import {hints} from "src/engine/relays/utils"
+import {channels} from "./state"
 
-export const loadAllNip04Messages = () => {
-  const {pubkey, nip04_messages_last_synced = 0} = session.get()
-  const since = Math.max(0, nip04_messages_last_synced - seconds(3, "day"))
-
-  sessions.update(assocPath([pubkey, "nip04_messages_last_synced"], now()))
-
-  load({
-    relays: getUserRelayUrls("read"),
-    filters: [
-      {kinds: [4], authors: [pubkey], since},
-      {kinds: [4], "#p": [pubkey], since},
-    ],
-    onEvent: batch(1000, events => {
-      loadPubkeys(events.map(e => e.pubkey))
-    }),
-  })
-}
-
-export const listenForNip04Messages = (contactPubkey: string) => {
-  const {pubkey} = session.get()
-
-  return subscribe({
-    relays: getInboxHints([contactPubkey, pubkey]),
-    filters: [
-      {kinds: [EventKind.Nip04Message], authors: [pubkey], "#p": [contactPubkey]},
-      {kinds: [EventKind.Nip04Message], authors: [contactPubkey], "#p": [pubkey]},
-    ],
-  })
-}
-
-export const loadAllNip24Messages = () => {
-  const {pubkey, nip24_messages_last_synced} = session.get()
-  const since = Math.max(0, nip24_messages_last_synced - seconds(3, "day"))
+export const loadAllMessages = ({reload = false} = {}) => {
+  const {pubkey, nip24_messages_last_synced = 0} = session.get()
+  const since = reload ? 0 : Math.max(0, nip24_messages_last_synced - seconds(6, "hour"))
 
   sessions.update(assocPath([pubkey, "nip24_messages_last_synced"], now()))
 
   // To avoid unwrapping everything twice, listen to channels and load pubkeys there
-  const unsubscribe = nip24Channels.throttle(1000).subscribe($channels => {
-    loadPubkeys($channels.flatMap(c => c.members))
+  const unsubscribePubkeys = channels.throttle(1000).subscribe($channels => {
+    loadPubkeys($channels.flatMap(c => c.members || []))
   })
 
-  load({
-    relays: getUserRelayUrls("read"),
-    filters: [{kinds: [EventKind.GiftWrap], "#p": [pubkey], since}],
-    onClose: () => setTimeout(unsubscribe, 1000),
+  const cursor = new MultiCursor({
+    relays: hints.AllMessages().getUrls(),
+    filters: [
+      {kinds: [4], authors: [pubkey], since},
+      {kinds: [4, 1059], "#p": [pubkey], since},
+    ],
   })
+
+  let done = false
+
+  setTimeout(async () => {
+    while (!done) {
+      cursor.take(250)
+
+      await sleep(500)
+
+      done = cursor.done()
+    }
+  })
+
+  return [
+    cursor,
+    () => {
+      done = true
+      unsubscribePubkeys()
+    },
+  ]
 }
 
-export const listenForNip59Messages = () => {
+export const listenForMessages = (pubkeys: string[]) => {
   const {pubkey} = session.get()
+  const allPubkeys = uniq(pubkeys.concat(pubkey))
+  console.log(hints.getUserRelays())
+  console.log(hints.options.getPubkeyRelays(pubkeys[0]))
+  console.log(hints.Messages(pubkeys).limit(100).getUrls())
 
   return subscribe({
-    relays: getPubkeyHints(pubkey, "read"),
-    filters: [{kinds: [1059], "#p": [pubkey]}],
+    skipCache: true,
+    relays: hints.Messages(pubkeys).getUrls(),
+    filters: [
+      {kinds: [4], authors: allPubkeys, "#p": allPubkeys},
+      {kinds: [1059], "#p": [pubkey]},
+    ],
   })
 }

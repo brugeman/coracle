@@ -1,52 +1,195 @@
 <script lang="ts">
-  import {Capacitor} from "@capacitor/core"
+  import cx from "classnames"
+  import {onMount} from "svelte"
+  import {last, prop, objOf} from "ramda"
+  import {Handlerinformation, NostrConnect} from "nostr-tools/kinds"
+  import {tryJson} from "src/util/misc"
+  import {toast} from "src/partials/state"
   import Anchor from "src/partials/Anchor.svelte"
-  import Content from "src/partials/Content.svelte"
+  import Input from "src/partials/Input.svelte"
+  import SearchSelect from "src/partials/SearchSelect.svelte"
+  import FlexColumn from "src/partials/FlexColumn.svelte"
   import Heading from "src/partials/Heading.svelte"
-  import {withExtension, loginWithExtension} from "src/engine"
+  import {
+    load,
+    hints,
+    fetchHandle,
+    getExtension,
+    withExtension,
+    loginWithExtension,
+    loginWithNostrConnect,
+  } from "src/engine"
   import {router} from "src/app/router"
   import {boot} from "src/app/state"
 
-  const nip07 = "https://github.com/nostr-protocol/nips/blob/master/07.md"
+  const signUp = () => router.at("signup").replaceModal()
 
-  const autoLogIn = () =>
+  const useBunker = () => router.at("login/bunker").replaceModal()
+
+  const useExtension = () =>
     withExtension(async ext => {
-      if (ext) {
-        loginWithExtension(await ext.getPublicKey())
+      const pubkey = ext && (await ext.getPublicKey())
+
+      if (pubkey) {
+        loginWithExtension(pubkey)
         boot()
-      } else {
-        router.at("login/privkey").replaceModal()
       }
     })
 
-  const signUp = () => router.at("onboarding").replaceModal()
+  const usePrivateKey = () => router.at("login/privkey").replaceModal()
 
-  const advancedLogIn = () => router.at("login/advanced").replaceModal()
+  const usePublicKey = () => router.at("login/pubkey").replaceModal()
+
+  const onSubmit = async () => {
+    if (!username) {
+      return toast.show("warning", "Please enter a user name.")
+    }
+
+    if (!handler) {
+      return toast.show("warning", "Please select a login provider.")
+    }
+
+    // Fill in pubkey and relays if they entered a custom doain
+    if (!handler.pubkey) {
+      const info = await fetchHandle(`_@${handler.domain}`)
+
+      handler.pubkey = info.pubkey
+      handler.relays = info.nip46 || info.relays
+    }
+
+    if (!handler.relays) {
+      return toast.show("warning", "Sorry, we weren't able to find that provider.")
+    }
+
+    const success = await loginWithNostrConnect(username, handler)
+
+    if (success) {
+      boot()
+    } else {
+      toast.show("warning", "Sorry, we weren't able to log you in with that provider.")
+    }
+  }
+
+  let handlers = [
+    //  {
+    //    domain: "coracle-bunker.ngrok.io",
+    //    relays: ["wss://relay.nsecbunker.com", "wss://relay.damus.io"],
+    //    pubkey: "b6e0188cf22c58a96b5cf6f29014f140697196f149a2621536b12d50abf55aa0",
+    //  },
+    {
+      domain: "highlighter.com",
+      relays: ["wss://relay.nsecbunker.com", "wss://relay.damus.io"],
+      pubkey: "73c6bb92440a9344279f7a36aa3de1710c9198b1e9e8a394cd13e0dd5c994c63",
+    },
+    {
+      domain: "nsec.app",
+      relays: ["wss://relay.nsec.app"],
+      pubkey: "e24a86943d37a91ab485d6f9a7c66097c25ddd67e8bd1b75ed252a3c266cf9bb",
+    },
+  ]
+
+  let handler = handlers[0]
+  let username = ""
+
+  onMount(() => {
+    load({
+      relays: hints.ReadRelays().getUrls(),
+      filters: [
+        {
+          kinds: [Handlerinformation],
+          "#k": [NostrConnect.toString()],
+        },
+      ],
+      onEvent: async e => {
+        const content = tryJson(() => JSON.parse(e.content))
+
+        if (!content) {
+          return
+        }
+
+        const domain = last(content.nip05.split("@"))
+        const {pubkey, nip46: relays} = (await fetchHandle(`_@${domain}`)) || {}
+
+        if (handlers.some(h => h.domain === domain)) {
+          return
+        }
+
+        if (pubkey === e.pubkey) {
+          handlers = handlers.concat({pubkey, domain, relays})
+        }
+      },
+    })
+  })
 
   document.title = "Log In"
 </script>
 
-<Content size="lg" class="text-center">
-  <div class="flex max-w-2xl flex-col gap-8">
-    <div class="mb-4 flex flex-col items-center justify-center">
+<form on:submit={onSubmit}>
+  <FlexColumn narrow large>
+    <div class="text-center">
       <Heading>Welcome!</Heading>
-      <i>To the Nostr Network</i>
+      <p class="text-lg text-neutral-100">
+        Don't have an account yet?
+        <Anchor underline on:click={signUp} class="ml-1 text-neutral-100">Sign up</Anchor>
+      </p>
     </div>
-    <p class="text-center">
-      Click below to log in or create an account.
-      {#if !Capacitor.isNativePlatform()}
-        If you have a <Anchor class="underline" href={nip07} external
-          >compatible browser extension</Anchor> installed, we will use that.
+    <div class="flex">
+      <Input
+        bind:value={username}
+        class="rounded-r-none"
+        wrapperClass="flex-grow"
+        placeholder="Username">
+        <i slot="before" class="fa fa-user-astronaut" />
+      </Input>
+      <SearchSelect
+        bind:value={handler}
+        defaultOptions={handlers}
+        getKey={prop("domain")}
+        termToItem={objOf("domain")}
+        inputClass="rounded-l-none border-l-0"
+        inputWrapperClass="flex-grow"
+        search={() => handlers}>
+        <i slot="before" class="fa fa-at relative top-[2px]" />
+        <span slot="item" let:item>{item.domain}</span>
+      </SearchSelect>
+    </div>
+    <Anchor button accent on:click={onSubmit}>Log In</Anchor>
+    <div class="relative flex items-center gap-4">
+      <div class="h-px flex-grow bg-neutral-600" />
+      <div class="staatliches text-xl">Or</div>
+      <div class="h-px flex-grow bg-neutral-600" />
+    </div>
+    <div
+      class={cx(
+        "relative grid justify-center gap-2 xs:gap-5",
+        getExtension() ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3",
+      )}>
+      <Anchor button square low on:click={useBunker} class="flex-col justify-center gap-3">
+        <div>
+          <i class="fa fa-box fa-xl" />
+        </div>
+        <span>Bunker URL</span>
+      </Anchor>
+      {#if getExtension()}
+        <Anchor button square low on:click={useExtension} class="flex-col justify-center gap-3">
+          <div>
+            <i class="fa fa-puzzle-piece fa-xl" />
+          </div>
+          <span>Extension</span>
+        </Anchor>
       {/if}
-    </p>
-    <div class="flex flex-col items-center gap-4">
-      <div class="flex gap-4">
-        <Anchor class="w-32 text-center" theme="button-accent" on:click={autoLogIn}>Log In</Anchor>
-        <Anchor class="w-32 text-center" theme="button" on:click={signUp}>Sign Up</Anchor>
-      </div>
-      <Anchor on:click={advancedLogIn}>
-        <i class="fa fa-cogs" /> Advanced Login
+      <Anchor button square low on:click={usePrivateKey} class="flex-col justify-center gap-3">
+        <div>
+          <i class="fa fa-key fa-xl" />
+        </div>
+        <span>Private Key</span>
+      </Anchor>
+      <Anchor button square low on:click={usePublicKey} class="flex-col justify-center gap-3">
+        <div>
+          <i class="fa fa-eye fa-xl" />
+        </div>
+        <span>Public Key</span>
       </Anchor>
     </div>
-  </div>
-</Content>
+  </FlexColumn>
+</form>

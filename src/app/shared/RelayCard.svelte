@@ -9,23 +9,31 @@
   import {canSign, getSetting, displayRelay, setRelayPolicy} from "src/engine"
 
   export let relay
+  export let claim = null
   export let rating = null
   export let showStatus = false
   export let hideActions = false
   export let showControls = false
+  export let inert = false
 </script>
 
 <div
-  class="flex flex-col justify-between gap-3 rounded-xl border border-l-2 border-solid border-gray-6 bg-gray-8 px-6 py-3 shadow"
+  class="flex flex-col justify-between gap-3 rounded-xl border border-l-2 border-solid border-neutral-600 bg-neutral-800 px-6 py-3 shadow"
   style={`border-left-color: ${hsl(stringToHue(relay.url))}`}>
   <div class="flex items-center justify-between gap-2">
     <div class="flex min-w-0 items-center gap-2 text-xl">
-      <i class={relay.url.startsWith("ws://") ? "fa fa-unlock" : "fa fa-lock"} />
-      <Anchor
-        href={router.at("relays").of(relay.url).toString()}
-        class="overflow-hidden text-ellipsis whitespace-nowrap">
-        {displayRelay(relay)}
-      </Anchor>
+      {#if inert}
+        <div class="overflow-hidden text-ellipsis whitespace-nowrap">
+          {displayRelay(relay)}
+        </div>
+      {:else}
+        <Anchor
+          modal
+          href={router.at("relays").of(relay.url).toString()}
+          class="overflow-hidden text-ellipsis whitespace-nowrap">
+          {displayRelay(relay)}
+        </Anchor>
+      {/if}
       {#if showStatus && !getSetting("multiplextr_url")}
         <RelayStatus {relay} />
       {/if}
@@ -37,7 +45,7 @@
     </div>
     {#if !hideActions}
       <slot name="actions">
-        <RelayCardActions {relay} />
+        <RelayCardActions {relay} {claim} />
       </slot>
     {/if}
   </div>
@@ -45,7 +53,7 @@
     <p>{relay.description}</p>
   {/if}
   {#if showControls && $canSign}
-    <div class="-mx-6 my-1 h-px bg-gray-7" />
+    <div class="-mx-6 my-1 h-px bg-tinted-700" />
     <div class="flex justify-between gap-2">
       <span>Publish to this relay?</span>
       <Toggle

@@ -3,10 +3,10 @@
   import Popover from "src/partials/Popover.svelte"
   import OverflowMenu from "src/partials/OverflowMenu.svelte"
   import {
-    env,
     loginWithPublicKey,
     session,
     mute,
+    hints,
     unmute,
     canSign,
     follow,
@@ -20,7 +20,6 @@
   export let pubkey
 
   const isSelf = $session?.pubkey === pubkey
-  const npub = nip19.npubEncode(pubkey)
   const following = deriveFollowing(pubkey)
   const muted = deriveMuted(pubkey)
 
@@ -28,6 +27,14 @@
 
   $: {
     actions = []
+
+    if (!isSelf && $canSign) {
+      actions.push({
+        onClick: $muted ? unmutePerson : mutePerson,
+        label: $muted ? "Unmute" : "Mute",
+        icon: $muted ? "microphone-slash" : "microphone",
+      })
+    }
 
     if ($canSign) {
       actions.push({
@@ -39,7 +46,13 @@
 
     if (!isSelf && $canSign) {
       actions.push({
-        onClick: () => router.at("conversations").of(npub).push(),
+        onClick: () => router.at("notes/create").qp({pubkey}).open(),
+        label: "Mention",
+        icon: "at",
+      })
+
+      actions.push({
+        onClick: () => router.at("channels").of([$session.pubkey, pubkey]).push(),
         label: "Message",
         icon: "envelope",
       })
@@ -49,9 +62,7 @@
       actions.push({onClick: loginAsUser, label: "Login as", icon: "right-to-bracket"})
     }
 
-    if ($env.FORCE_RELAYS.length === 0) {
-      actions.push({onClick: openProfileInfo, label: "Details", icon: "info"})
-    }
+    actions.push({onClick: openProfileInfo, label: "Details", icon: "info"})
 
     if (isSelf && $canSign) {
       actions.push({
@@ -77,30 +88,32 @@
   const unmutePerson = () => unmute(pubkey)
 
   const mutePerson = () => mute("p", pubkey)
+
+  const share = () =>
+    router
+      .at("qrcode")
+      .of(nip19.nprofileEncode({pubkey, relays: hints.FromPubkeys([pubkey]).limit(3).getUrls()}))
+      .open()
 </script>
 
 <div class="flex items-center gap-3" on:click|stopPropagation>
   {#if !isSelf}
     <Popover triggerType="mouseenter">
-      <div slot="trigger" class="w-6 text-center">
-        {#if $muted}
-          <i class="fa fa-microphone-slash cursor-pointer" on:click={unmutePerson} />
-        {:else}
-          <i class="fa fa-microphone cursor-pointer" on:click={mutePerson} />
-        {/if}
-      </div>
-      <div slot="tooltip">{$muted ? "Unmute" : "Mute"}</div>
-    </Popover>
-    <Popover triggerType="mouseenter">
-      <div slot="trigger" class="w-6 text-center">
+      <div slot="trigger" class="w-6 cursor-pointer text-center">
         {#if $following}
-          <i class="fa fa-user-minus cursor-pointer" on:click={unfollowPerson} />
+          <i class="fa fa-user-minus" on:click={unfollowPerson} />
         {:else}
-          <i class="fa fa-user-plus cursor-pointer" on:click={followPerson} />
+          <i class="fa fa-user-plus" on:click={followPerson} />
         {/if}
       </div>
       <div slot="tooltip">{$following ? "Unfollow" : "Follow"}</div>
     </Popover>
   {/if}
+  <Popover triggerType="mouseenter">
+    <div slot="trigger" class="w-6 cursor-pointer text-center">
+      <i class="fa fa-share-nodes" on:click={share} />
+    </div>
+    <div slot="tooltip">Share</div>
+  </Popover>
   <OverflowMenu {actions} />
 </div>

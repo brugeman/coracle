@@ -1,7 +1,6 @@
 import Bugsnag from "@bugsnag/js"
-import {writable} from "svelte/store"
-import {hash, union, sleep} from "hurdak"
-import {now} from "paravel"
+import {hash, union} from "hurdak"
+import {ConnectionStatus} from "paravel"
 import {warn} from "src/util/logger"
 import {userKinds} from "src/util/nostr"
 import {toast} from "src/partials/state"
@@ -9,19 +8,26 @@ import {router} from "src/app/router"
 import {
   env,
   pool,
-  session,
+  pubkey,
   follows,
+  session,
+  writable,
+  loadSeen,
+  loadGroups,
   loadDeletes,
   loadPubkeys,
+  loadGiftWrap,
   getUserRelayUrls,
   listenForNotifications,
   getSetting,
   dufflepud,
 } from "src/engine"
 
-// Menu
+// Global state
 
 export const menuIsOpen = writable(false)
+
+export const searchTerm = writable("")
 
 // Redact long strings, especially hex and bech32 keys which are 64 and 63
 // characters long, respectively. Put the threshold a little lower in case
@@ -47,7 +53,7 @@ setTimeout(() => {
     event.exceptions = redactErrorInfo(event.exceptions)
     event.breadcrumbs = redactErrorInfo(event.breadcrumbs)
 
-    event.setUser(session)
+    event.setUser(session.get())
 
     return true
   })
@@ -58,9 +64,9 @@ const sessionId = Math.random().toString().slice(2)
 export const logUsage = async (path: string) => {
   // Hash the user's pubkey so we can identify unique users without knowing
   // anything about them
-  const pubkey = session.get()?.pubkey
-  const ident = pubkey ? hash(pubkey) : "unknown"
-  const name = path.replace(/(npub|nprofile|note|nevent)1[^\/]+/g, (_, m) => `<${m}>`)
+  const $pubkey = pubkey.get()
+  const ident = $pubkey ? hash($pubkey) : "unknown"
+  const name = btoa(path.replace(/(npub|nprofile|note|nevent)1[^\/]+/g, (_, m) => `<${m}>`))
 
   if (getSetting("report_analytics")) {
     try {
@@ -83,11 +89,13 @@ setInterval(() => {
   // Prune connections we haven't used in a while, clear errors periodically,
   // and keep track of slow connections
   for (const [url, connection] of pool.data.entries()) {
-    if (connection.meta.last_activity < now() - 60) {
+    const {lastPublish, lastRequest} = connection.meta
+    const lastActivity = Math.max(lastPublish, lastRequest)
+    const status = connection.meta.getStatus()
+
+    if (lastActivity < Date.now() - 60_000) {
       connection.disconnect()
-    } else if (connection.lastError < Date.now() - 10_000) {
-      connection.clearError()
-    } else if (userRelays.has(url) && connection.meta.quality < 0.3) {
+    } else if (userRelays.has(url) && status === ConnectionStatus.Slow) {
       $slowConnections.push(url)
     }
   }
@@ -98,36 +106,33 @@ setInterval(() => {
 
 // Synchronization from events to state
 
-export const loadAppData = async () => {
-  const {pubkey} = session.get()
+export const loadAppData = () => {
+  // If we have a group, load that
+  if (env.get().FORCE_GROUP) {
+    loadGroups([env.get().FORCE_GROUP])
+  }
+}
 
+export const loadUserData = () => {
   // Make sure the user and their follows are loaded
-  await loadPubkeys([pubkey], {force: true, kinds: userKinds})
+  loadPubkeys([pubkey.get()], {force: true, kinds: userKinds}).then(() =>
+    loadPubkeys(follows.get()),
+  )
+
+  // Load read receipts
+  loadSeen()
 
   // Load deletes
   loadDeletes()
 
-  // Load their network
-  loadPubkeys(Array.from(follows.get()))
+  // Load encrypted stuff
+  loadGiftWrap()
 
   // Start our listener
   listenForNotifications()
 }
 
-export const boot = async () => {
-  if (env.get().FORCE_RELAYS.length > 0) {
-    router.at("message").cx({message: "Logging you in..."}).replaceModal({noEscape: true})
-
-    await Promise.all([
-      sleep(1500),
-      loadPubkeys([session.get().pubkey], {force: true, kinds: userKinds}),
-    ])
-
-    router.at("notes").replace()
-  } else {
-    router.at("login/connect").open({noEscape: true})
-  }
-}
+export const boot = () => router.at("login/connect").open({noEscape: true})
 
 export const toastProgress = progress => {
   const {event, succeeded, failed, timeouts, completed, pending} = progress

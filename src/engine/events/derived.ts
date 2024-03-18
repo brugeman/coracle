@@ -1,16 +1,16 @@
+import {Tags, getIdAndAddress} from "paravel"
 import {whereEq, groupBy, find} from "ramda"
-import {Tags} from "paravel"
 import {derived, DerivedCollection} from "src/engine/core/utils"
 import {pubkey} from "src/engine/session/state"
 import {settings} from "src/engine/session/derived"
 import {getWotScore} from "src/engine/people/utils"
 import {mutes, follows} from "src/engine/people/derived"
-import {deriveMembershipLevel} from "src/engine/groups/utils"
+import {deriveIsGroupMember} from "src/engine/groups/utils"
 import type {Event} from "./model"
-import {deletes, _events} from "./state"
+import {deletes, seen, _events} from "./state"
 
 export const events = new DerivedCollection<Event>("id", [_events, deletes], ([$e, $d]) =>
-  $e.filter(e => !$d.has(e.id))
+  $e.filter(e => !$d.has(e.id)),
 )
 
 export const userEvents = new DerivedCollection<Event>("id", [events, pubkey], ([$e, $pk]) => {
@@ -26,16 +26,20 @@ export const isEventMuted = derived([mutes, settings, pubkey], ([$mutes, $settin
   const regex =
     words.length > 0 ? new RegExp(`\\b(${words.map(w => w.toLowerCase()).join("|")})\\b`) : null
 
-  return (e: Event, strict = false) => {
+  return (e: Partial<Event>, strict = false) => {
     if (!$pubkey || e.pubkey === $pubkey) {
       return false
     }
 
-    const tags = Tags.from(e)
-    const reply = tags.getReply()
-    const root = tags.getRoot()
+    const tags = Tags.from(e.tags || [])
+    const {roots, replies} = tags.ancestors()
 
-    if (find(t => $mutes.has(t), [e.id, e.pubkey, reply, root])) {
+    if (
+      find(
+        t => $mutes.has(t),
+        [e.id, e.pubkey, ...roots.values().valueOf(), ...replies.values().valueOf()],
+      )
+    ) {
       return true
     }
 
@@ -47,12 +51,15 @@ export const isEventMuted = derived([mutes, settings, pubkey], ([$mutes, $settin
       return false
     }
 
-    const wotAdjustment = tags
+    const isGroupMember = tags
+      .groups()
+      .values()
+      .some(a => deriveIsGroupMember(a).get())
+    const isCommunityMember = tags
       .communities()
-      .all()
-      .some(a => deriveMembershipLevel(a).get())
-      ? 1
-      : 0
+      .values()
+      .some(a => false)
+    const wotAdjustment = isCommunityMember || isGroupMember ? 1 : 0
 
     if (!$follows.has(e.pubkey) && getWotScore($pubkey, e.pubkey) < minWot - wotAdjustment) {
       return true
@@ -61,3 +68,9 @@ export const isEventMuted = derived([mutes, settings, pubkey], ([$mutes, $settin
     return false
   }
 })
+
+export const isDeleted = deletes.derived(
+  $d => e => Boolean(getIdAndAddress(e).find(k => $d.has(k))),
+)
+
+export const isSeen = seen.mapStore.derived($m => e => $m.has(e.id))

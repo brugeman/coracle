@@ -1,7 +1,7 @@
 import crypto from "crypto"
 import {Fetch} from "hurdak"
 import {createEvent} from "paravel"
-import {generatePrivateKey} from "nostr-tools"
+import {generatePrivateKey} from "src/util/nostr"
 import {signer} from "src/engine/session/derived"
 
 export const nip98Fetch = async (url, method, body = null) => {
@@ -17,7 +17,7 @@ export const nip98Fetch = async (url, method, body = null) => {
   const template = createEvent(27235, {tags})
   const $signer = signer.get()
 
-  const event = $signer.canSign()
+  const event = $signer.isEnabled()
     ? await $signer.signAsUser(template)
     : await $signer.signWithKey(template, generatePrivateKey())
 

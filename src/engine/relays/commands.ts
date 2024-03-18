@@ -1,9 +1,9 @@
 import {whereEq, when, reject, uniqBy, prop, inc} from "ramda"
-import {now, normalizeRelayUrl, isShareableRelay} from "paravel"
+import {now, normalizeRelayUrl, createEvent, isShareableRelayUrl} from "paravel"
 import {people} from "src/engine/people/state"
-import {canSign, stateKey} from "src/engine/session/derived"
+import {session, canSign, signer, stateKey} from "src/engine/session/derived"
 import {updateStore} from "src/engine/core/commands"
-import {createAndPublish} from "src/engine/network/utils"
+import {createAndPublish, getClientTags, Publisher} from "src/engine/network/utils"
 import type {RelayPolicy} from "./model"
 import {relays} from "./state"
 import {relayPolicies} from "./derived"
@@ -11,7 +11,7 @@ import {relayPolicies} from "./derived"
 export const saveRelay = (url: string) => {
   url = normalizeRelayUrl(url)
 
-  if (isShareableRelay(url)) {
+  if (isShareableRelayUrl(url)) {
     const relay = relays.key(url).get()
 
     relays.key(url).merge({
@@ -42,7 +42,7 @@ export const publishRelays = ($relays: RelayPolicy[]) => {
   if (canSign.get()) {
     return createAndPublish(10002, {
       tags: $relays
-        .filter(r => isShareableRelay(r.url))
+        .filter(r => isShareableRelayUrl(r.url))
         .map(r => {
           const t = ["r", normalizeRelayUrl(r.url)]
 
@@ -51,12 +51,33 @@ export const publishRelays = ($relays: RelayPolicy[]) => {
           }
 
           return t
-        }),
+        })
+        .concat(getClientTags()),
     })
   }
 }
 
-export const joinRelay = (url: string) => {
+export const joinRelay = async (url: string, claim?: string) => {
+  url = normalizeRelayUrl(url)
+
+  if (claim && canSign.get()) {
+    const pub = Publisher.publish({
+      relays: [url],
+      event: await signer.get().signAsUser(
+        createEvent(28934, {
+          tags: [["claim", claim]],
+        }),
+      ),
+    })
+
+    await pub.result
+  }
+
+  // Re-publish user meta to the new relay
+  if (canSign.get() && session.get().kind3) {
+    Publisher.publish({event: session.get().kind3, relays: [url]})
+  }
+
   return publishRelays([
     ...reject(whereEq({url}), relayPolicies.get()),
     {url, read: true, write: true} as RelayPolicy,

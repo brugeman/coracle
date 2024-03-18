@@ -36,10 +36,11 @@
       </div>
       <Compose
         {onSubmit}
-        class="shadow-inset rounded bg-input px-2 py-2 text-black"
+        autofocus
+        class="shadow-inset rounded bg-tinted-200 px-2 py-2 text-black"
         style="min-height: 6rem"
         bind:this={compose} />
-      <Anchor tag="button" theme="button" type="submit" class="flex-grow text-center">Send</Anchor>
+      <Anchor button tag="button" type="submit" class="flex-grow">Send</Anchor>
     </div>
   </Content>
 </form>

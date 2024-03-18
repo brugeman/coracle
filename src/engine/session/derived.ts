@@ -1,31 +1,32 @@
 import {derived} from "src/engine/core/utils"
+import type {Person} from "src/engine/people/model"
 import {people} from "src/engine/people/state"
+import type {Session} from "./model"
 import {sessions, pubkey} from "./state"
-import {getSettings, getNdk, Signer, Nip04, Nip44, Nip59} from "./utils"
+import {getSettings, getSigner, getNip04, getNip44, getNip59, getConnect} from "./utils"
 
 export const stateKey = pubkey.derived($pk => $pk || "anonymous")
 
-export const session = derived([pubkey, sessions], ([$pk, $sessions]) =>
-  $pk ? $sessions[$pk] : null
+export const session = derived(
+  [pubkey, sessions],
+  ([$pk, $sessions]: [string, Record<string, Session>]) => ($pk ? $sessions[$pk] : null),
 )
 
-export const user = derived([stateKey, people.mapStore], ([$k, $p]) => $p.get($k))
-
-export const ndk = session.derived(getNdk)
-
-export const signer = derived([session, ndk], ([$session, $ndk]) => new Signer($session, $ndk))
-
-export const nip04 = derived([session, ndk], ([$session, $ndk]) => new Nip04($session, $ndk))
-
-export const nip44 = derived([session], ([$session]) => new Nip44($session))
-
-export const nip59 = derived(
-  [session, nip44, signer],
-  ([$session, $nip44, $signer]) => new Nip59($session, $nip44, $signer)
+export const user = derived(
+  [stateKey, people.mapStore],
+  ([$k, $p]: [string, Map<string, Person>]) => $p.get($k) || {pubkey: $k},
 )
 
-export const canSign = signer.derived($signer => $signer.canSign())
+export const connect = session.derived(getConnect)
 
-export const canUseGiftWrap = session.derived($session => $session?.method === "privkey")
+export const signer = session.derived(getSigner)
+
+export const nip04 = session.derived(getNip04)
+
+export const nip44 = session.derived(getNip44)
+
+export const nip59 = session.derived(getNip59)
+
+export const canSign = signer.derived($signer => $signer.isEnabled())
 
 export const settings = user.derived(getSettings)
